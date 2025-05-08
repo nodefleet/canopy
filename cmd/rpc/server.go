@@ -65,7 +65,7 @@ func NewServer(controller *controller.Controller, config lib.Config, logger lib.
 		controller: controller,
 		config:     config,
 		logger:     logger,
-		rcManager:  NewRCManager(controller, config, logger),
+		rcManager:  NewRCManagerForController(controller, config, logger),
 		poll:       make(fsm.Poll),
 		pollMux:    &sync.RWMutex{},
 	}

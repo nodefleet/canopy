@@ -2,15 +2,16 @@ package rpc
 
 import (
 	"fmt"
-	"github.com/canopy-network/canopy/controller"
-	"github.com/canopy-network/canopy/lib"
-	"github.com/gorilla/websocket"
-	"github.com/julienschmidt/httprouter"
 	"net/http"
 	"net/url"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/canopy-network/canopy/controller"
+	"github.com/canopy-network/canopy/lib"
+	"github.com/gorilla/websocket"
+	"github.com/julienschmidt/httprouter"
 )
 
 /* This file implements the client & server logic for the 'root-chain info' and corresponding 'on-demand' calls to the rpc */
@@ -30,8 +31,8 @@ type RCManager struct {
 	log           lib.LoggerI                   // stdout log
 }
 
-// NewRCManager() constructs a new instance of a RCManager
-func NewRCManager(controller *controller.Controller, config lib.Config, logger lib.LoggerI) (manager *RCManager) {
+// NewRCManagerForController() constructs a new instance of a RCManager meant to be used as part of the controller
+func NewRCManagerForController(controller *controller.Controller, config lib.Config, logger lib.LoggerI) (manager *RCManager) {
 	// create the manager
 	manager = &RCManager{
 		c:             config,
@@ -46,6 +47,19 @@ func NewRCManager(controller *controller.Controller, config lib.Config, logger l
 	controller.RCManager = manager
 	// exit
 	return
+}
+
+// NewRCManager() constructs a new instance of RCManager
+func NewRCManager(afterUpdate func(info *lib.RootChainInfo), config lib.Config, logger lib.LoggerI) (manager *RCManager) {
+	return &RCManager{
+		c:             config,
+		subscriptions: make(map[uint64]*RCSubscription),
+		subscribers:   make(map[uint64]*RCSubscriber),
+		l:             &sync.Mutex{},
+		afterRCUpdate: afterUpdate,
+		log:           logger,
+		upgrader:      websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+	}
 }
 
 // Start() attempts to establish a websocket connection with each root chain
