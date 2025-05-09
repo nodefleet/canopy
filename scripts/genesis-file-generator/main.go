@@ -116,13 +116,13 @@ func addAccounts(accounts int, genesis *fsm.GenesisState, gsync *sync.Mutex, wg 
 
 			nick := fmt.Sprintf("account-%d", i)
 
-			pk := mustCreateKey()
+			addrStr := fmt.Sprintf("%020x", i)
 
 			fmt.Printf("Creating key for: %s \n", nick)
 
 			gsync.Lock()
 			genesis.Accounts = append(genesis.Accounts, &fsm.Account{
-				Address: pk.PublicKey().Address().Bytes(),
+				Address: []byte(addrStr),
 				Amount:  1000000,
 			})
 			gsync.Unlock()
