@@ -1,9 +1,11 @@
 package rpc
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -24,7 +26,7 @@ const chainIdParamName = "chainId"
 type RCManager struct {
 	c             lib.Config                    // the global node config
 	subscriptions map[uint64]*RCSubscription    // chainId -> subscription
-	subscribers   map[uint64]*RCSubscriber      // chainId -> subscriber
+	subscribers   map[uint64][]*RCSubscriber    // chainId -> subscribers
 	l             *sync.Mutex                   // thread safety
 	afterRCUpdate func(info *lib.RootChainInfo) // callback after the root chain info update
 	upgrader      websocket.Upgrader            // upgrade http connection to ws
@@ -37,7 +39,7 @@ func NewRCManagerForController(controller *controller.Controller, config lib.Con
 	manager = &RCManager{
 		c:             config,
 		subscriptions: make(map[uint64]*RCSubscription),
-		subscribers:   make(map[uint64]*RCSubscriber),
+		subscribers:   make(map[uint64][]*RCSubscriber),
 		l:             controller.Mutex,
 		afterRCUpdate: controller.UpdateRootChainInfo,
 		upgrader:      websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
@@ -54,7 +56,7 @@ func NewRCManager(afterUpdate func(info *lib.RootChainInfo), config lib.Config, 
 	return &RCManager{
 		c:             config,
 		subscriptions: make(map[uint64]*RCSubscription),
-		subscribers:   make(map[uint64]*RCSubscriber),
+		subscribers:   make(map[uint64][]*RCSubscriber),
 		l:             &sync.Mutex{},
 		afterRCUpdate: afterUpdate,
 		log:           logger,
@@ -79,14 +81,14 @@ func (r *RCManager) Publish(chainId uint64, info *lib.RootChainInfo) {
 		return
 	}
 	// for each ws client
-	for _, subscriber := range r.subscribers {
-		// skip if not this chain id
-		if subscriber.chainId != chainId {
-			continue
-		}
+
+	for _, subscriber := range r.subscribers[chainId] {
 		// publish to each client
 		if e := subscriber.conn.WriteMessage(websocket.BinaryMessage, protoBytes); e != nil {
-			subscriber.Stop(e)
+			// defer the Stop() call to prevent the slice modification during iteration.
+			// since Stop() removes the subscriber from r.subscribers, immediate execution
+			// would affect the slice that is currently being iterated.
+			defer subscriber.Stop(e)
 		}
 	}
 }
@@ -96,10 +98,17 @@ func (r *RCManager) ChainIds() (list []uint64) {
 	// de-duplicate the results
 	deDupe := lib.NewDeDuplicator[uint64]()
 	// for each client
-	for _, client := range r.subscribers {
+	for chainId, chainSubscribers := range r.subscribers {
 		// if the client chain id isn't empty and not duplicate
-		if client.chainId != 0 && !deDupe.Found(client.chainId) {
-			list = append(list, client.chainId)
+		for _, subscriber := range chainSubscribers {
+			if subscriber.chainId != chainId {
+				// remove subscriber with incorrect chain id
+				subscriber.Stop(errors.New("incorrect chain id"))
+				continue
+			}
+			if subscriber.chainId != 0 && !deDupe.Found(subscriber.chainId) {
+				list = append(list, subscriber.chainId)
+			}
 		}
 	}
 	return
@@ -438,16 +447,18 @@ func (r *RCManager) AddSubscriber(subscriber *RCSubscriber) {
 	r.l.Lock()
 	defer r.l.Unlock()
 	// add to the map
-	r.subscribers[subscriber.chainId] = subscriber
+	r.subscribers[subscriber.chainId] = append(r.subscribers[subscriber.chainId], subscriber)
 }
 
 // RemoveSubscriber() gracefully deletes a RC subscriber
-func (r *RCManager) RemoveSubscriber(chainId uint64) {
+func (r *RCManager) RemoveSubscriber(chainId uint64, subscriber *RCSubscriber) {
 	// lock for thread safety
 	r.l.Lock()
 	defer r.l.Unlock()
-	// remove from the map
-	delete(r.subscribers, chainId)
+	// remove from the slice
+	r.subscribers[chainId] = slices.DeleteFunc(r.subscribers[chainId], func(sub *RCSubscriber) bool {
+		return sub == subscriber
+	})
 }
 
 // Stop() stops the client
@@ -459,5 +470,5 @@ func (r *RCSubscriber) Stop(err error) {
 		r.log.Error(err.Error())
 	}
 	// remove from the manager
-	r.manager.RemoveSubscriber(r.chainId)
+	r.manager.RemoveSubscriber(r.chainId, r)
 }

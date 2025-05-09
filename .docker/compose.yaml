@@ -14,6 +14,7 @@ services:
       - 50002:50002 # RPC
       - 50003:50003 # Admin RPC
       - 9001:9001 # TCP P2P
+      - 9090:9090 # Prometheus metrics
     networks:
       - canopy
     command: ["start"]
