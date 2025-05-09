@@ -7,12 +7,15 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/canopy-network/canopy/fsm"
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
 )
+
+const maxConcurrency = 10
 
 var (
 	defaultConfig = &lib.Config{
@@ -103,49 +106,85 @@ func mustUpdateKeystore(privateKey []byte, nickName, password string, keystore *
 	}
 }
 
-func addAccounts(accounts int, password string, genesis *fsm.GenesisState, keystore *crypto.Keystore) {
+// addAccounts concurrently creates keys and accounts
+func addAccounts(accounts int, password string, genesis *fsm.GenesisState, keystore *crypto.Keystore, gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{}) {
 	for i := range accounts {
-		pk := mustCreateKey()
-		genesis.Accounts = append(genesis.Accounts, &fsm.Account{
-			Address: pk.PublicKey().Address().Bytes(),
-			Amount:  1000000,
-		})
-		mustUpdateKeystore(pk.Bytes(), fmt.Sprintf("account-%d", i), password, keystore)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			semaphoreChan <- struct{}{}
+			defer func() { <-semaphoreChan }()
+
+			nick := fmt.Sprintf("account-%d", i)
+
+			pk := mustCreateKey()
+
+			fmt.Printf("Creating key for: %s \n", nick)
+
+			gsync.Lock()
+			genesis.Accounts = append(genesis.Accounts, &fsm.Account{
+				Address: pk.PublicKey().Address().Bytes(),
+				Amount:  1000000,
+			})
+			mustUpdateKeystore(pk.Bytes(), nick, password, keystore)
+			gsync.Unlock()
+		}(i)
 	}
 }
 
-func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, password string, genesis *fsm.GenesisState, keystore *crypto.Keystore, files *IndividualFiles) {
+// addValidators concurrently creates validators and optional config
+func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, password string,
+	genesis *fsm.GenesisState, keystore *crypto.Keystore, files *IndividualFiles,
+	gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{}) {
+
 	for i := range validators {
-		stakedAmount := 0
-		if multiNode || (i == 0 && !isDelegate) {
-			stakedAmount = 1000000000
-		}
-		nick := fmt.Sprintf("%s-%d", nickPrefix, i)
-		pk := mustCreateKey()
-		if (multiNode || i == 0) && !isDelegate {
-			config := defaultConfig
-			config.RootChain[0].Url = fmt.Sprintf("http://%s:50002", nick)
-			config.ExternalAddress = nick
-			files.Files = append(files.Files, &IndividualFile{
-				Config:       config,
-				ValidatorKey: pk.String(),
-				Nick:         nick,
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			semaphoreChan <- struct{}{}
+			defer func() { <-semaphoreChan }()
+
+			stakedAmount := 0
+			if multiNode || (i == 0 && !isDelegate) {
+				stakedAmount = 1000000000
+			}
+			nick := fmt.Sprintf("%s-%d", nickPrefix, i)
+			pk := mustCreateKey()
+			fmt.Printf("Creating key for: %s \n", nick)
+
+			var configCopy *lib.Config
+			if (multiNode || i == 0) && !isDelegate {
+				config := *defaultConfig
+				config.RootChain[0].Url = fmt.Sprintf("http://%s:50002", nick)
+				config.ExternalAddress = nick
+				configCopy = &config
+			}
+
+			gsync.Lock()
+			genesis.Accounts = append(genesis.Accounts, &fsm.Account{
+				Address: pk.PublicKey().Address().Bytes(),
+				Amount:  1000000,
 			})
-		}
-		genesis.Accounts = append(genesis.Accounts, &fsm.Account{
-			Address: pk.PublicKey().Address().Bytes(),
-			Amount:  1000000,
-		})
-		genesis.Validators = append(genesis.Validators, &fsm.Validator{
-			Address:      pk.PublicKey().Address().Bytes(),
-			PublicKey:    pk.PublicKey().Bytes(),
-			Committees:   []uint64{1},
-			NetAddress:   fmt.Sprintf("tcp://%s", nick),
-			StakedAmount: uint64(stakedAmount),
-			Output:       pk.PublicKey().Address().Bytes(),
-			Delegate:     isDelegate,
-		})
-		mustUpdateKeystore(pk.Bytes(), nick, password, keystore)
+			genesis.Validators = append(genesis.Validators, &fsm.Validator{
+				Address:      pk.PublicKey().Address().Bytes(),
+				PublicKey:    pk.PublicKey().Bytes(),
+				Committees:   []uint64{1},
+				NetAddress:   fmt.Sprintf("tcp://%s", nick),
+				StakedAmount: uint64(stakedAmount),
+				Output:       pk.PublicKey().Address().Bytes(),
+				Delegate:     isDelegate,
+			})
+			mustUpdateKeystore(pk.Bytes(), nick, password, keystore)
+
+			if configCopy != nil {
+				files.Files = append(files.Files, &IndividualFile{
+					Config:       configCopy,
+					ValidatorKey: pk.String(),
+					Nick:         nick,
+				})
+			}
+			gsync.Unlock()
+		}(i)
 	}
 }
 
@@ -256,9 +295,15 @@ func main() {
 
 	files := &IndividualFiles{}
 
-	addAccounts(*accounts, *password, genesis, keystore)
-	addValidators(*validators, false, *multiNode, "validator", *password, genesis, keystore, files)
-	addValidators(*delegators, true, *multiNode, "delegator", *password, genesis, keystore, files)
+	semaphoreChan := make(chan struct{}, maxConcurrency)
+	var gsync sync.Mutex
+	var wg sync.WaitGroup
+
+	addAccounts(*accounts, *password, genesis, keystore, &gsync, &wg, semaphoreChan)
+	addValidators(*validators, false, *multiNode, "validator", *password, genesis, keystore, files, &gsync, &wg, semaphoreChan)
+	addValidators(*delegators, true, *multiNode, "delegator", *password, genesis, keystore, files, &gsync, &wg, semaphoreChan)
+
+	wg.Wait()
 
 	mustSetDirectory(".config")
 	mustDeleteInDirectory(".config")
