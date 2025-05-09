@@ -15,8 +15,6 @@ import (
 	"github.com/canopy-network/canopy/lib/crypto"
 )
 
-const maxConcurrency = 10
-
 var (
 	defaultConfig = &lib.Config{
 		MainConfig: lib.MainConfig{
@@ -81,6 +79,7 @@ var (
 type IndividualFile struct {
 	Config       *lib.Config
 	ValidatorKey string
+	Keystore     *crypto.Keystore
 	Nick         string
 }
 
@@ -107,7 +106,7 @@ func mustUpdateKeystore(privateKey []byte, nickName, password string, keystore *
 }
 
 // addAccounts concurrently creates keys and accounts
-func addAccounts(accounts int, password string, genesis *fsm.GenesisState, keystore *crypto.Keystore, gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{}) {
+func addAccounts(accounts int, genesis *fsm.GenesisState, gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{}) {
 	for i := range accounts {
 		wg.Add(1)
 		go func(i int) {
@@ -126,7 +125,6 @@ func addAccounts(accounts int, password string, genesis *fsm.GenesisState, keyst
 				Address: pk.PublicKey().Address().Bytes(),
 				Amount:  1000000,
 			})
-			mustUpdateKeystore(pk.Bytes(), nick, password, keystore)
 			gsync.Unlock()
 		}(i)
 	}
@@ -134,7 +132,7 @@ func addAccounts(accounts int, password string, genesis *fsm.GenesisState, keyst
 
 // addValidators concurrently creates validators and optional config
 func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, password string,
-	genesis *fsm.GenesisState, keystore *crypto.Keystore, files *IndividualFiles,
+	genesis *fsm.GenesisState, files *IndividualFiles,
 	gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{}) {
 
 	for i := range validators {
@@ -153,11 +151,16 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 			fmt.Printf("Creating key for: %s \n", nick)
 
 			var configCopy *lib.Config
+			keystore := &crypto.Keystore{
+				AddressMap:  make(map[string]*crypto.EncryptedPrivateKey, 1),
+				NicknameMap: make(map[string]string, 1),
+			}
 			if (multiNode || i == 0) && !isDelegate {
 				config := *defaultConfig
 				config.RootChain[0].Url = fmt.Sprintf("http://%s:50002", nick)
 				config.ExternalAddress = nick
 				configCopy = &config
+				mustUpdateKeystore(pk.Bytes(), nick, password, keystore)
 			}
 
 			gsync.Lock()
@@ -174,13 +177,13 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 				Output:       pk.PublicKey().Address().Bytes(),
 				Delegate:     isDelegate,
 			})
-			mustUpdateKeystore(pk.Bytes(), nick, password, keystore)
 
 			if configCopy != nil {
 				files.Files = append(files.Files, &IndividualFile{
 					Config:       configCopy,
 					ValidatorKey: pk.String(),
 					Nick:         nick,
+					Keystore:     keystore,
 				})
 			}
 			gsync.Unlock()
@@ -226,11 +229,12 @@ func mustSaveAsJSON(filename string, data any) {
 }
 func main() {
 	var (
-		delegators = flag.Int("delegators", 10, "Number of delegators")
-		validators = flag.Int("validators", 5, "Number of validators")
-		accounts   = flag.Int("accounts", 100, "Number of accounts")
-		password   = flag.String("password", "pablito", "Password for keystore")
-		multiNode  = flag.Bool("multiNode", false, "Flag to create config for multiples nodes or not")
+		delegators  = flag.Int("delegators", 10, "Number of delegators")
+		validators  = flag.Int("validators", 5, "Number of validators")
+		accounts    = flag.Int("accounts", 100, "Number of accounts")
+		password    = flag.String("password", "pablito", "Password for keystore")
+		multiNode   = flag.Bool("multiNode", false, "Flag to create config for multiples nodes or not")
+		concurrency = flag.Int64("concurrency", 100, "Concurrency of the processes")
 	)
 	flag.Parse()
 
@@ -288,25 +292,24 @@ func main() {
 		},
 	}
 
-	keystore := &crypto.Keystore{
-		AddressMap:  make(map[string]*crypto.EncryptedPrivateKey, *accounts+*delegators+*validators),
-		NicknameMap: make(map[string]string, *delegators+*validators),
-	}
-
 	files := &IndividualFiles{}
 
-	semaphoreChan := make(chan struct{}, maxConcurrency)
+	semaphoreChan := make(chan struct{}, *concurrency)
 	var gsync sync.Mutex
 	var wg sync.WaitGroup
 
-	addAccounts(*accounts, *password, genesis, keystore, &gsync, &wg, semaphoreChan)
-	addValidators(*validators, false, *multiNode, "validator", *password, genesis, keystore, files, &gsync, &wg, semaphoreChan)
-	addValidators(*delegators, true, *multiNode, "delegator", *password, genesis, keystore, files, &gsync, &wg, semaphoreChan)
+	addAccounts(*accounts, genesis, &gsync, &wg, semaphoreChan)
+	addValidators(*validators, false, *multiNode, "validator", *password, genesis, files, &gsync, &wg, semaphoreChan)
+	addValidators(*delegators, true, *multiNode, "delegator", *password, genesis, files, &gsync, &wg, semaphoreChan)
 
 	wg.Wait()
 
+	fmt.Println("Deleting old files!")
+
 	mustSetDirectory(".config")
 	mustDeleteInDirectory(".config")
+
+	fmt.Println("Creating new files!")
 
 	for _, file := range files.Files {
 		nodePath := fmt.Sprintf(".config/%s", file.Nick)
@@ -314,7 +317,7 @@ func main() {
 		mustSetDirectory(nodePath)
 
 		mustSaveAsJSON(fmt.Sprintf("%s/genesis.json", nodePath), genesis)
-		mustSaveAsJSON(fmt.Sprintf("%s/keystore.json", nodePath), keystore)
+		mustSaveAsJSON(fmt.Sprintf("%s/keystore.json", nodePath), file.Keystore)
 		mustSaveAsJSON(fmt.Sprintf("%s/config.json", nodePath), file.Config)
 		mustSaveAsJSON(fmt.Sprintf("%s/validator_key.json", nodePath), file.ValidatorKey)
 	}
