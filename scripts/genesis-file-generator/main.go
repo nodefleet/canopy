@@ -68,6 +68,10 @@ var (
 			IndividualMaxTxSize: 4000,
 			DropPercentage:      35,
 		},
+		MetricsConfig: lib.MetricsConfig{
+			Enabled:           true,
+			PrometheusAddress: "0.0.0.0:9090",
+		},
 	}
 )
 
