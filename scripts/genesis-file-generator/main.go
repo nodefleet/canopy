@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/canopy-network/canopy/fsm"
 	"github.com/canopy-network/canopy/lib"
@@ -241,7 +240,7 @@ func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGr
 	writer := jwriter.NewStreamingWriter(genesisFile, 1024)
 
 	obj := writer.Object()
-	obj.Name("time").Int(int(time.Now().Unix()))
+	obj.Name("time").String("2024-12-14 20:10:52")
 
 	fmt.Println("Starting to write validators!")
 
