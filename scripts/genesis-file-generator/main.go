@@ -247,49 +247,37 @@ func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGr
 
 	obj.Name("validators")
 	arr := writer.Array()
-	var validatortWg sync.WaitGroup
-	validatortWg.Add(1)
-	go func() {
-		defer validatortWg.Done()
-		for range validatorLen {
-			validator := <-validatorChan
-			validatorObj := writer.Object()
-			validatorObj.Name("address").String(hex.EncodeToString(validator.Address))
-			validatorObj.Name("publicKey").String(hex.EncodeToString(validator.PublicKey))
-			validatorObj.Name("committees")
-			cArr := writer.Array()
-			for _, committee := range validator.Committees {
-				writer.Int(int(committee))
-			}
-			cArr.End()
-			validatorObj.Name("netAddress").String(validator.NetAddress)
-			validatorObj.Name("stakedAmount").Int(int(validator.StakedAmount))
-			validatorObj.Name("output").String(hex.EncodeToString(validator.Output))
-			validatorObj.Name("delegate").Bool(validator.Delegate)
-			validatorObj.End()
+	for range validatorLen {
+		validator := <-validatorChan
+		validatorObj := writer.Object()
+		validatorObj.Name("address").String(hex.EncodeToString(validator.Address))
+		validatorObj.Name("publicKey").String(hex.EncodeToString(validator.PublicKey))
+		validatorObj.Name("committees")
+		cArr := writer.Array()
+		for _, committee := range validator.Committees {
+			writer.Int(int(committee))
 		}
-		arr.End()
-	}()
-	validatortWg.Wait()
+		cArr.End()
+		validatorObj.Name("netAddress").String(validator.NetAddress)
+		validatorObj.Name("stakedAmount").Int(int(validator.StakedAmount))
+		validatorObj.Name("output").String(hex.EncodeToString(validator.Output))
+		validatorObj.Name("delegate").Bool(validator.Delegate)
+		validatorObj.End()
+	}
+	arr.End()
 
 	fmt.Println("Starting to write accounts!")
 
 	obj.Name("accounts")
 	arr = writer.Array()
-	var accountWg sync.WaitGroup
-	accountWg.Add(1)
-	go func() {
-		defer accountWg.Done()
-		for range accountLen {
-			account := <-accountChan
-			accountObj := writer.Object()
-			accountObj.Name("address").String(hex.EncodeToString(account.Address))
-			accountObj.Name("amount").Int(int(account.Amount))
-			accountObj.End()
-		}
-		arr.End()
-	}()
-	accountWg.Wait()
+	for range accountLen {
+		account := <-accountChan
+		accountObj := writer.Object()
+		accountObj.Name("address").String(hex.EncodeToString(account.Address))
+		accountObj.Name("amount").Int(int(account.Amount))
+		accountObj.End()
+	}
+	arr.End()
 
 	nonSignWindow := 10
 	maxNonSign := 4
