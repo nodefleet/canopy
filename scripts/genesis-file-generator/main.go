@@ -229,7 +229,35 @@ func mustSaveAsJSON(filename string, data any) {
 	}
 }
 
-func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGroup, accountChan chan *fsm.Account, validatorChan chan *fsm.Validator) {
+func accountsWriter(accountLen int, wg *sync.WaitGroup, accountChan chan *fsm.Account) {
+	defer wg.Done()
+
+	accountsFile, err := os.Create(".config/accounts.json")
+	if err != nil {
+		panic(err)
+	}
+	defer accountsFile.Close()
+
+	writer := jwriter.NewStreamingWriter(accountsFile, 1024)
+
+	fmt.Println("Starting to write accounts!")
+
+	arr := writer.Array()
+	for range accountLen {
+		account := <-accountChan
+		accountObj := writer.Object()
+		accountObj.Name("address").String(hex.EncodeToString(account.Address))
+		accountObj.Name("amount").Int(int(account.Amount))
+		accountObj.End()
+	}
+	arr.End()
+
+	if err := writer.Flush(); err != nil {
+		panic(err)
+	}
+}
+
+func genesisWriter(multiNode bool, validatorLen int, wg, accountsWG *sync.WaitGroup, validatorChan chan *fsm.Validator) {
 	defer wg.Done()
 
 	genesisFile, err := os.Create(".config/genesis.json")
@@ -266,18 +294,13 @@ func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGr
 	}
 	arr.End()
 
-	fmt.Println("Starting to write accounts!")
-
-	obj.Name("accounts")
-	arr = writer.Array()
-	for range accountLen {
-		account := <-accountChan
-		accountObj := writer.Object()
-		accountObj.Name("address").String(hex.EncodeToString(account.Address))
-		accountObj.Name("amount").Int(int(account.Amount))
-		accountObj.End()
+	accountsWG.Wait()
+	fmt.Println("Accounts arrived to main thread!")
+	rawAccounts, err := os.ReadFile(".config/accounts.json")
+	if err != nil {
+		panic(err)
 	}
-	arr.End()
+	obj.Name("accounts").Raw(rawAccounts)
 
 	nonSignWindow := 10
 	maxNonSign := 4
@@ -363,31 +386,26 @@ func main() {
 		password    = flag.String("password", "pablito", "Password for keystore")
 		multiNode   = flag.Bool("multiNode", false, "Flag to create config for multiples nodes or not")
 		concurrency = flag.Int64("concurrency", 100, "Concurrency of the processes")
-		buffer      = flag.Int64("buffer", 0, "Buffer of validators to be saved while waiting processing")
+		buffer      = flag.Int64("buffer", 1000, "Buffer of validators and accounts to be saved while waiting processing")
 	)
 	flag.Parse()
 
-	acountsLen := int64(*delegators + *validators + *accounts)
-	validatorsLen := int64(*delegators + *validators)
+	acountsLen := *delegators + *validators + *accounts
+	validatorsLen := *delegators + *validators
 
-	if *buffer == 0 {
-		buffer = &validatorsLen
-	}
-
-	accountChan := make(chan *fsm.Account, acountsLen) // this needs to always be the accounts len bc it starts writing after the validators
+	accountChan := make(chan *fsm.Account, *buffer)
 	validatorChan := make(chan *fsm.Validator, *buffer)
 
-	var genesisWG sync.WaitGroup
-
+	var genesisWG, accountsWG sync.WaitGroup
 	genesisWG.Add(1)
-	go genesisWriter(*multiNode, int(acountsLen), int(validatorsLen), &genesisWG, accountChan, validatorChan)
+	accountsWG.Add(1)
+	go genesisWriter(*multiNode, validatorsLen, &genesisWG, &accountsWG, validatorChan)
+	go accountsWriter(acountsLen, &accountsWG, accountChan)
 
 	files := &IndividualFiles{}
-
 	semaphoreChan := make(chan struct{}, *concurrency)
 	var gsync sync.Mutex
 	var wg sync.WaitGroup
-
 	addValidators(*validators, false, *multiNode, "validator", *password, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
 	addValidators(*delegators, true, *multiNode, "delegator", *password, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
 	addAccounts(*accounts, &wg, semaphoreChan, accountChan)
