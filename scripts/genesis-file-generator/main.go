@@ -163,11 +163,6 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 				mustUpdateKeystore(pk.Bytes(), nick, password, keystore)
 			}
 
-			accountChan <- &fsm.Account{
-				Address: pk.PublicKey().Address().Bytes(),
-				Amount:  1000000,
-			}
-
 			validatorChan <- &fsm.Validator{
 				Address:      pk.PublicKey().Address().Bytes(),
 				PublicKey:    pk.PublicKey().Bytes(),
@@ -176,6 +171,11 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 				StakedAmount: uint64(stakedAmount),
 				Output:       pk.PublicKey().Address().Bytes(),
 				Delegate:     isDelegate,
+			}
+
+			accountChan <- &fsm.Account{
+				Address: pk.PublicKey().Address().Bytes(),
+				Amount:  1000000,
 			}
 
 			if configCopy != nil {
@@ -243,29 +243,10 @@ func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGr
 	obj := writer.Object()
 	obj.Name("time").Int(int(time.Now().Unix()))
 
-	fmt.Println("Starting to write accounts!")
-
-	obj.Name("accounts")
-	arr := writer.Array()
-	var accountWg sync.WaitGroup
-	accountWg.Add(1)
-	go func() {
-		defer accountWg.Done()
-		for range accountLen {
-			account := <-accountChan
-			accountObj := writer.Object()
-			accountObj.Name("address").String(hex.EncodeToString(account.Address))
-			accountObj.Name("amount").Int(int(account.Amount))
-			accountObj.End()
-		}
-		arr.End()
-	}()
-	accountWg.Wait()
-
 	fmt.Println("Starting to write validators!")
 
 	obj.Name("validators")
-	arr = writer.Array()
+	arr := writer.Array()
 	var validatortWg sync.WaitGroup
 	validatortWg.Add(1)
 	go func() {
@@ -290,6 +271,25 @@ func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGr
 		arr.End()
 	}()
 	validatortWg.Wait()
+
+	fmt.Println("Starting to write accounts!")
+
+	obj.Name("accounts")
+	arr = writer.Array()
+	var accountWg sync.WaitGroup
+	accountWg.Add(1)
+	go func() {
+		defer accountWg.Done()
+		for range accountLen {
+			account := <-accountChan
+			accountObj := writer.Object()
+			accountObj.Name("address").String(hex.EncodeToString(account.Address))
+			accountObj.Name("amount").Int(int(account.Amount))
+			accountObj.End()
+		}
+		arr.End()
+	}()
+	accountWg.Wait()
 
 	nonSignWindow := 10
 	maxNonSign := 4
@@ -375,25 +375,24 @@ func main() {
 		password    = flag.String("password", "pablito", "Password for keystore")
 		multiNode   = flag.Bool("multiNode", false, "Flag to create config for multiples nodes or not")
 		concurrency = flag.Int64("concurrency", 100, "Concurrency of the processes")
-
-		buffer = flag.Int64("buffer", 0, "Buffer of accounts to be saved while waiting processing")
+		buffer      = flag.Int64("buffer", 0, "Buffer of validators to be saved while waiting processing")
 	)
 	flag.Parse()
 
 	acountsLen := int64(*delegators + *validators + *accounts)
-	validatorsLen := *delegators + *validators
+	validatorsLen := int64(*delegators + *validators)
 
 	if *buffer == 0 {
-		buffer = &acountsLen
+		buffer = &validatorsLen
 	}
 
-	accountChan := make(chan *fsm.Account, *buffer)
-	validatorChan := make(chan *fsm.Validator, validatorsLen) // this needs to always be the validators len bc it starts writing after the accounts
+	accountChan := make(chan *fsm.Account, acountsLen) // this needs to always be the accounts len bc it starts writing after the validators
+	validatorChan := make(chan *fsm.Validator, *buffer)
 
 	var genesisWG sync.WaitGroup
 
 	genesisWG.Add(1)
-	go genesisWriter(*multiNode, int(acountsLen), validatorsLen, &genesisWG, accountChan, validatorChan)
+	go genesisWriter(*multiNode, int(acountsLen), int(validatorsLen), &genesisWG, accountChan, validatorChan)
 
 	files := &IndividualFiles{}
 
@@ -401,9 +400,9 @@ func main() {
 	var gsync sync.Mutex
 	var wg sync.WaitGroup
 
-	addAccounts(*accounts, &wg, semaphoreChan, accountChan)
 	addValidators(*validators, false, *multiNode, "validator", *password, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
 	addValidators(*delegators, true, *multiNode, "delegator", *password, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
+	addAccounts(*accounts, &wg, semaphoreChan, accountChan)
 
 	wg.Wait()
 	genesisWG.Wait()
