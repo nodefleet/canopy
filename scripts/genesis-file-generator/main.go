@@ -15,6 +15,7 @@ import (
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
 	"github.com/launchdarkly/go-jsonstream/v3/jwriter"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -133,7 +134,7 @@ func addAccounts(accounts int, wg *sync.WaitGroup, semaphoreChan chan struct{}, 
 // addValidators concurrently creates validators and optional config
 func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, password string,
 	files *IndividualFiles, gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{},
-	accountChan chan *fsm.Account, validatorChan chan *fsm.Validator) {
+	accountChan chan *fsm.Account, validatorChan chan []byte) {
 
 	for i := range validators {
 		wg.Add(1)
@@ -168,7 +169,7 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 				Amount:  1000000,
 			}
 
-			validatorChan <- &fsm.Validator{
+			validatorData, err := proto.Marshal(&fsm.Validator{
 				Address:      pk.PublicKey().Address().Bytes(),
 				PublicKey:    pk.PublicKey().Bytes(),
 				Committees:   []uint64{1},
@@ -176,7 +177,12 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 				StakedAmount: uint64(stakedAmount),
 				Output:       pk.PublicKey().Address().Bytes(),
 				Delegate:     isDelegate,
+			})
+			if err != nil {
+				panic(err)
 			}
+
+			validatorChan <- validatorData
 
 			if configCopy != nil {
 				gsync.Lock()
@@ -229,7 +235,7 @@ func mustSaveAsJSON(filename string, data any) {
 	}
 }
 
-func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGroup, accountChan chan *fsm.Account, validatorChan chan *fsm.Validator) {
+func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGroup, accountChan chan *fsm.Account, validatorChan chan []byte) {
 	defer wg.Done()
 
 	genesisFile, err := os.Create(".config/genesis.json")
@@ -271,7 +277,12 @@ func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGr
 	go func() {
 		defer validatortWg.Done()
 		for range validatorLen {
-			validator := <-validatorChan
+			validatorData := <-validatorChan
+			var validator fsm.Validator
+			err := proto.Unmarshal(validatorData, &validator)
+			if err != nil {
+				panic(err)
+			}
 			validatorObj := writer.Object()
 			validatorObj.Name("address").String(hex.EncodeToString(validator.Address))
 			validatorObj.Name("publicKey").String(hex.EncodeToString(validator.PublicKey))
@@ -375,8 +386,7 @@ func main() {
 		password    = flag.String("password", "pablito", "Password for keystore")
 		multiNode   = flag.Bool("multiNode", false, "Flag to create config for multiples nodes or not")
 		concurrency = flag.Int64("concurrency", 100, "Concurrency of the processes")
-
-		buffer = flag.Int64("buffer", 0, "Buffer of accounts to be saved while waiting processing")
+		buffer      = flag.Int64("buffer", 0, "Buffer of accounts to be saved while waiting processing")
 	)
 	flag.Parse()
 
@@ -388,7 +398,7 @@ func main() {
 	}
 
 	accountChan := make(chan *fsm.Account, *buffer)
-	validatorChan := make(chan *fsm.Validator, validatorsLen) // this needs to always be the validators len bc it starts writing after the accounts
+	validatorChan := make(chan []byte, validatorsLen) // this needs to always be the validators len bc it starts writing after the accounts
 
 	var genesisWG sync.WaitGroup
 
