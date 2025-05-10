@@ -14,7 +14,9 @@ require (
 	github.com/drand/kyber-bls12381 v0.3.1
 	github.com/ethereum/go-ethereum v1.14.8
 	github.com/fatih/color v1.17.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/julienschmidt/httprouter v1.3.0
+	github.com/launchdarkly/go-jsonstream/v3 v3.1.0
 	github.com/libp2p/go-buffer-pool v0.1.0
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f
 	github.com/nsf/jsondiff v0.0.0-20230430225905-43f6cf3098c1
@@ -48,11 +50,11 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/flatbuffers v1.12.1 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/holiman/uint256 v1.3.1 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/kilic/bls12-381 v0.1.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
+	github.com/mailru/easyjson v0.7.6 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

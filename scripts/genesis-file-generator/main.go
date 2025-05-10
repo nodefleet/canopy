@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/canopy-network/canopy/fsm"
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
+	"github.com/launchdarkly/go-jsonstream/v3/jwriter"
 )
 
 var (
@@ -106,7 +108,7 @@ func mustUpdateKeystore(privateKey []byte, nickName, password string, keystore *
 }
 
 // addAccounts concurrently creates keys and accounts
-func addAccounts(accounts int, genesis *fsm.GenesisState, gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{}) {
+func addAccounts(accounts int, wg *sync.WaitGroup, semaphoreChan chan struct{}, accountChan chan *fsm.Account) {
 	for i := range accounts {
 		wg.Add(1)
 		go func(i int) {
@@ -120,20 +122,18 @@ func addAccounts(accounts int, genesis *fsm.GenesisState, gsync *sync.Mutex, wg 
 
 			fmt.Printf("Creating key for: %s \n", nick)
 
-			gsync.Lock()
-			genesis.Accounts = append(genesis.Accounts, &fsm.Account{
+			accountChan <- &fsm.Account{
 				Address: []byte(addrStr),
 				Amount:  1000000,
-			})
-			gsync.Unlock()
+			}
 		}(i)
 	}
 }
 
 // addValidators concurrently creates validators and optional config
 func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, password string,
-	genesis *fsm.GenesisState, files *IndividualFiles,
-	gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{}) {
+	files *IndividualFiles, gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{},
+	accountChan chan *fsm.Account, validatorChan chan *fsm.Validator) {
 
 	for i := range validators {
 		wg.Add(1)
@@ -163,12 +163,12 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 				mustUpdateKeystore(pk.Bytes(), nick, password, keystore)
 			}
 
-			gsync.Lock()
-			genesis.Accounts = append(genesis.Accounts, &fsm.Account{
+			accountChan <- &fsm.Account{
 				Address: pk.PublicKey().Address().Bytes(),
 				Amount:  1000000,
-			})
-			genesis.Validators = append(genesis.Validators, &fsm.Validator{
+			}
+
+			validatorChan <- &fsm.Validator{
 				Address:      pk.PublicKey().Address().Bytes(),
 				PublicKey:    pk.PublicKey().Bytes(),
 				Committees:   []uint64{1},
@@ -176,17 +176,18 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 				StakedAmount: uint64(stakedAmount),
 				Output:       pk.PublicKey().Address().Bytes(),
 				Delegate:     isDelegate,
-			})
+			}
 
 			if configCopy != nil {
+				gsync.Lock()
 				files.Files = append(files.Files, &IndividualFile{
 					Config:       configCopy,
 					ValidatorKey: pk.String(),
 					Nick:         nick,
 					Keystore:     keystore,
 				})
+				gsync.Unlock()
 			}
-			gsync.Unlock()
 		}(i)
 	}
 }
@@ -227,27 +228,78 @@ func mustSaveAsJSON(filename string, data any) {
 		panic(err)
 	}
 }
-func main() {
-	var (
-		delegators  = flag.Int("delegators", 10, "Number of delegators")
-		validators  = flag.Int("validators", 5, "Number of validators")
-		accounts    = flag.Int("accounts", 100, "Number of accounts")
-		password    = flag.String("password", "pablito", "Password for keystore")
-		multiNode   = flag.Bool("multiNode", false, "Flag to create config for multiples nodes or not")
-		concurrency = flag.Int64("concurrency", 100, "Concurrency of the processes")
-	)
-	flag.Parse()
+
+func genesisWriter(multiNode bool, accountLen, validatorLen int, wg *sync.WaitGroup, accountChan chan *fsm.Account, validatorChan chan *fsm.Validator) {
+	defer wg.Done()
+
+	genesisFile, err := os.Create(".config/genesis.json")
+	if err != nil {
+		panic(err)
+	}
+	defer genesisFile.Close()
+
+	writer := jwriter.NewStreamingWriter(genesisFile, 1024)
+
+	obj := writer.Object()
+	obj.Name("time").Int(int(time.Now().Unix()))
+
+	fmt.Println("Starting to write accounts!")
+
+	obj.Name("accounts")
+	arr := writer.Array()
+	var accountWg sync.WaitGroup
+	accountWg.Add(1)
+	go func() {
+		defer accountWg.Done()
+		for range accountLen {
+			account := <-accountChan
+			accountObj := writer.Object()
+			accountObj.Name("address").String(hex.EncodeToString(account.Address))
+			accountObj.Name("amount").Int(int(account.Amount))
+			accountObj.End()
+		}
+		arr.End()
+	}()
+	accountWg.Wait()
+
+	fmt.Println("Starting to write validators!")
+
+	obj.Name("validators")
+	arr = writer.Array()
+	var validatortWg sync.WaitGroup
+	validatortWg.Add(1)
+	go func() {
+		defer validatortWg.Done()
+		for range validatorLen {
+			validator := <-validatorChan
+			validatorObj := writer.Object()
+			validatorObj.Name("address").String(hex.EncodeToString(validator.Address))
+			validatorObj.Name("publicKey").String(hex.EncodeToString(validator.PublicKey))
+			validatorObj.Name("committees")
+			cArr := writer.Array()
+			for _, committee := range validator.Committees {
+				writer.Int(int(committee))
+			}
+			cArr.End()
+			validatorObj.Name("netAddress").String(validator.NetAddress)
+			validatorObj.Name("stakedAmount").Int(int(validator.StakedAmount))
+			validatorObj.Name("output").String(hex.EncodeToString(validator.Output))
+			validatorObj.Name("delegate").Bool(validator.Delegate)
+			validatorObj.End()
+		}
+		arr.End()
+	}()
+	validatortWg.Wait()
 
 	nonSignWindow := 10
 	maxNonSign := 4
-	if !*multiNode {
+	if !multiNode {
 		maxNonSign = math.MaxInt64
 		nonSignWindow = math.MaxInt64
 	}
 
-	genesis := &fsm.GenesisState{
-		Time: uint64(time.Now().Unix()),
-		Params: &fsm.Params{
+	remainingFields := map[string]interface{}{
+		"params": &fsm.Params{
 			Consensus: &fsm.ConsensusParams{
 				BlockSize:       1000000,
 				ProtocolVersion: "1/0",
@@ -292,18 +344,23 @@ func main() {
 		},
 	}
 
-	files := &IndividualFiles{}
+	for key, value := range remainingFields {
+		obj.Name(key)
+		data, err := json.Marshal(value)
+		if err != nil {
+			panic(err)
+		}
+		writer.Raw(json.RawMessage(data))
+	}
 
-	semaphoreChan := make(chan struct{}, *concurrency)
-	var gsync sync.Mutex
-	var wg sync.WaitGroup
+	obj.End()
 
-	addAccounts(*accounts, genesis, &gsync, &wg, semaphoreChan)
-	addValidators(*validators, false, *multiNode, "validator", *password, genesis, files, &gsync, &wg, semaphoreChan)
-	addValidators(*delegators, true, *multiNode, "delegator", *password, genesis, files, &gsync, &wg, semaphoreChan)
+	if err := writer.Flush(); err != nil {
+		panic(err)
+	}
+}
 
-	wg.Wait()
-
+func main() {
 	fmt.Println("Deleting old files!")
 
 	mustSetDirectory(".config")
@@ -311,12 +368,61 @@ func main() {
 
 	fmt.Println("Creating new files!")
 
+	var (
+		delegators  = flag.Int("delegators", 10, "Number of delegators")
+		validators  = flag.Int("validators", 5, "Number of validators")
+		accounts    = flag.Int("accounts", 100, "Number of accounts")
+		password    = flag.String("password", "pablito", "Password for keystore")
+		multiNode   = flag.Bool("multiNode", false, "Flag to create config for multiples nodes or not")
+		concurrency = flag.Int64("concurrency", 100, "Concurrency of the processes")
+
+		buffer = flag.Int64("buffer", 0, "Buffer of accounts to be saved while waiting processing")
+	)
+	flag.Parse()
+
+	acountsLen := int64(*delegators + *validators + *accounts)
+	validatorsLen := *delegators + *validators
+
+	if *buffer == 0 {
+		buffer = &acountsLen
+	}
+
+	accountChan := make(chan *fsm.Account, *buffer)
+	validatorChan := make(chan *fsm.Validator, validatorsLen) // this needs to always be the validators len bc it starts writing after the accounts
+
+	var genesisWG sync.WaitGroup
+
+	genesisWG.Add(1)
+	go genesisWriter(*multiNode, int(acountsLen), validatorsLen, &genesisWG, accountChan, validatorChan)
+
+	files := &IndividualFiles{}
+
+	semaphoreChan := make(chan struct{}, *concurrency)
+	var gsync sync.Mutex
+	var wg sync.WaitGroup
+
+	addAccounts(*accounts, &wg, semaphoreChan, accountChan)
+	addValidators(*validators, false, *multiNode, "validator", *password, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
+	addValidators(*delegators, true, *multiNode, "delegator", *password, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
+
+	wg.Wait()
+	genesisWG.Wait()
+
 	for _, file := range files.Files {
 		nodePath := fmt.Sprintf(".config/%s", file.Nick)
 
 		mustSetDirectory(nodePath)
 
-		mustSaveAsJSON(fmt.Sprintf("%s/genesis.json", nodePath), genesis)
+		input, err := os.ReadFile(".config/genesis.json")
+		if err != nil {
+			panic(err)
+		}
+
+		err = os.WriteFile(fmt.Sprintf("%s/genesis.json", nodePath), input, 0644)
+		if err != nil {
+			panic(err)
+		}
+
 		mustSaveAsJSON(fmt.Sprintf("%s/keystore.json", nodePath), file.Keystore)
 		mustSaveAsJSON(fmt.Sprintf("%s/config.json", nodePath), file.Config)
 		mustSaveAsJSON(fmt.Sprintf("%s/validator_key.json", nodePath), file.ValidatorKey)
