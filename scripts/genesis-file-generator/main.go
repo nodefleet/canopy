@@ -169,7 +169,7 @@ func addAccounts(accounts int, wg *sync.WaitGroup, semaphoreChan chan struct{}, 
 }
 
 // addValidators concurrently creates validators and optional config
-func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, password string,
+func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, password, customRootChainURL, customExternalAddress string,
 	files *IndividualFiles, gsync *sync.Mutex, wg *sync.WaitGroup, semaphoreChan chan struct{},
 	accountChan chan *fsm.Account, validatorChan chan *fsm.Validator) {
 
@@ -195,8 +195,16 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 			}
 			if (multiNode || i == 0) && !isDelegate {
 				config := *defaultConfig
-				config.RootChain[0].Url = fmt.Sprintf("http://%s:50002", nick)
-				config.ExternalAddress = nick
+				if customRootChainURL != "" {
+					config.RootChain[0].Url = customRootChainURL
+				} else {
+					config.RootChain[0].Url = fmt.Sprintf("http://%s:50002", nick)
+				}
+				if customExternalAddress != "" {
+					config.ExternalAddress = customExternalAddress
+				} else {
+					config.ExternalAddress = nick
+				}
 				configCopy = &config
 				mustUpdateKeystore(pk.Bytes(), nick, password, keystore)
 			}
@@ -423,15 +431,21 @@ func main() {
 	fmt.Println("Creating new files!")
 
 	var (
-		delegators  = flag.Int("delegators", 10, "Number of delegators")
-		validators  = flag.Int("validators", 5, "Number of validators")
-		accounts    = flag.Int("accounts", 100, "Number of accounts")
-		password    = flag.String("password", "pablito", "Password for keystore")
-		multiNode   = flag.Bool("multiNode", false, "Flag to create config for multiples nodes or not")
-		concurrency = flag.Int64("concurrency", 100, "Concurrency of the processes")
-		buffer      = flag.Int64("buffer", 1000, "Buffer of validators and accounts to be saved while waiting processing")
+		delegators            = flag.Int("delegators", 10, "Number of delegators")
+		validators            = flag.Int("validators", 5, "Number of validators")
+		accounts              = flag.Int("accounts", 100, "Number of accounts")
+		password              = flag.String("password", "pablito", "Password for keystore")
+		multiNode             = flag.Bool("multiNode", false, "Flag to create config for multiples nodes or not")
+		concurrency           = flag.Int64("concurrency", 100, "Concurrency of the processes")
+		buffer                = flag.Int64("buffer", 1000, "Buffer of validators and accounts to be saved while waiting processing")
+		customRootChainURL    = flag.String("root_chain_url", "", "Custom name for root chain url")
+		customExternalAddress = flag.String("external_address", "", "Custom name for external address")
 	)
 	flag.Parse()
+
+	if *multiNode && (*customRootChainURL != "" || *customExternalAddress != "") {
+		panic("Custom root chain url and/or external address can just be used on not multi node")
+	}
 
 	acountsLen := *delegators + *validators + *accounts
 	validatorsLen := *delegators + *validators
@@ -451,8 +465,8 @@ func main() {
 	semaphoreChan := make(chan struct{}, *concurrency)
 	var gsync sync.Mutex
 	var wg sync.WaitGroup
-	addValidators(*validators, false, *multiNode, "validator", *password, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
-	addValidators(*delegators, true, *multiNode, "delegator", *password, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
+	addValidators(*validators, false, *multiNode, "validator", *password, *customRootChainURL, *customExternalAddress, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
+	addValidators(*delegators, true, *multiNode, "delegator", *password, *customRootChainURL, *customExternalAddress, files, &gsync, &wg, semaphoreChan, accountChan, validatorChan)
 	addAccounts(*accounts, &wg, semaphoreChan, accountChan)
 
 	wg.Wait()
