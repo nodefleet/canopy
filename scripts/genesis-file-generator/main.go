@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/canopy-network/canopy/fsm"
 	"github.com/canopy-network/canopy/lib"
@@ -75,11 +77,49 @@ var (
 			PrometheusAddress: "0.0.0.0:9090",
 		},
 	}
+	nickNames = make(chan string, 1000)
 )
 
+const (
+	validatorNick = "validator"
+	delegatorNick = "delegator"
+	accountNick   = "account"
+)
+
+func logData() {
+	var accounts, validators, delegators int32
+
+	go func() {
+		for nickname := range nickNames {
+			switch nickname {
+			case accountNick:
+				atomic.AddInt32(&accounts, 1)
+			case validatorNick:
+				atomic.AddInt32(&validators, 1)
+			case delegatorNick:
+				atomic.AddInt32(&delegators, 1)
+			default:
+				fmt.Println("Unknown data type received:", nickname)
+			}
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+
+		for range ticker.C {
+			fmt.Printf("Accounts: %d, Validators: %d, Delegators: %d\n",
+				atomic.LoadInt32(&accounts),
+				atomic.LoadInt32(&validators),
+				atomic.LoadInt32(&delegators),
+			)
+		}
+	}()
+}
+
 type IndividualFile struct {
-	Config       *lib.Config
 	ValidatorKey string
+	Config       *lib.Config
 	Keystore     *crypto.Keystore
 	Nick         string
 }
@@ -115,16 +155,15 @@ func addAccounts(accounts int, wg *sync.WaitGroup, semaphoreChan chan struct{}, 
 			semaphoreChan <- struct{}{}
 			defer func() { <-semaphoreChan }()
 
-			nick := fmt.Sprintf("account-%d", i)
-
 			addrStr := fmt.Sprintf("%020x", i)
 
-			fmt.Printf("Creating key for: %s \n", nick)
+			// fmt.Printf("Creating key for: %s \n", nick)
 
 			accountChan <- &fsm.Account{
 				Address: []byte(addrStr),
 				Amount:  1000000,
 			}
+			nickNames <- accountNick
 		}(i)
 	}
 }
@@ -147,7 +186,7 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 			}
 			nick := fmt.Sprintf("%s-%d", nickPrefix, i)
 			pk := mustCreateKey()
-			fmt.Printf("Creating key for: %s \n", nick)
+			// fmt.Printf("Creating key for: %s \n", nick)
 
 			var configCopy *lib.Config
 			keystore := &crypto.Keystore{
@@ -186,6 +225,11 @@ func addValidators(validators int, isDelegate, multiNode bool, nickPrefix, passw
 					Keystore:     keystore,
 				})
 				gsync.Unlock()
+			}
+			if isDelegate {
+				nickNames <- delegatorNick
+			} else {
+				nickNames <- validatorNick
 			}
 		}(i)
 	}
@@ -394,6 +438,8 @@ func main() {
 
 	accountChan := make(chan *fsm.Account, *buffer)
 	validatorChan := make(chan *fsm.Validator, *buffer)
+
+	logData()
 
 	var genesisWG, accountsWG sync.WaitGroup
 	genesisWG.Add(1)
