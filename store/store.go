@@ -557,7 +557,12 @@ func (s *Store) setCommitID(version uint64, root []byte) lib.ErrorI {
 		return err
 	}
 	k := s.commitIDKey(version)
-	return w.Set(k, value)
+
+	if err = w.Set(k, value); err != nil {
+		return err
+	}
+
+	return w.Write()
 }
 
 // historicalPrefix() calculates the prefix for a particular historical partition given the block height
