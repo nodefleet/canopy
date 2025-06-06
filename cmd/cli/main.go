@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -68,6 +69,9 @@ var startCmd = &cobra.Command{
 
 // Start() is the entrypoint of the application
 func Start() {
+	go func() {
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+	}()
 	// allow sleep and wake up using config
 	wakeDate := time.Unix(int64(config.SleepUntil), 0)
 	if time.Now().Before(wakeDate) {

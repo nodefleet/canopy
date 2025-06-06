@@ -73,7 +73,7 @@ func (c *Controller) Sync() {
 	// set the Controller as 'syncing'
 	c.isSyncing.Store(true)
 	// check if node is alone in the validator set
-	if c.singleNodeNetwork() {
+	if true {
 		// complete syncing
 		c.finishSyncing()
 		// exit
@@ -441,7 +441,7 @@ func (c *Controller) SendToReplicas(replicas lib.ValidatorSet, msg lib.Signable)
 			// if not self, send directly to peer using P2P
 			if err = c.P2P.SendTo(replica.PublicKey, Cons, signedMessage); err != nil {
 				// log the error (warning is used in case 'some' replicas are not reachable)
-				c.log.Warn(err.Error())
+				// c.log.Warn(err.Error())
 			}
 		}
 	}

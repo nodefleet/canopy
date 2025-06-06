@@ -111,8 +111,8 @@ type cache struct {
 type txn struct {
 	ops map[string]valueOp // [string(key)] -> set/del operations saved in memory
 	// sorted   []string           // ops keys sorted lexicographically; needed for iteration
-	sorted    *btree.BTreeG[*TreeItem] // sorted btree of keys for fast iteration
-	sortedLen int                      // len(sorted)
+	sorted    *btree.BTreeG[*CacheItem] // sorted btree of keys for fast iteration
+	sortedLen int                       // len(sorted)
 }
 
 // txn() returns a copy of the current transaction cache
@@ -152,7 +152,7 @@ func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, 
 		logger: logger,
 		cache: txn{
 			ops: make(map[string]valueOp),
-			sorted: btree.NewG(48, func(a, b *TreeItem) bool {
+			sorted: btree.NewG(48, func(a, b *CacheItem) bool {
 				return a.Less(b)
 			}), // need to benchmark this value
 		},
@@ -168,7 +168,7 @@ func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, logger lib.Logg
 		logger: logger,
 		cache: txn{
 			ops: make(map[string]valueOp),
-			sorted: btree.NewG(48, func(a, b *TreeItem) bool {
+			sorted: btree.NewG(48, func(a, b *CacheItem) bool {
 				return a.Less(b)
 			}),
 		},
@@ -234,7 +234,7 @@ func (t *Txn) updateEntry(key string, v *badger.Entry) {
 // addToSorted() inserts a key into the sorted list of operations maintaining lexicographical order
 func (t *Txn) addToSorted(key string) {
 	t.cache.sortedLen++
-	t.cache.sorted.ReplaceOrInsert(&TreeItem{Key: key, Exists: true})
+	t.cache.sorted.ReplaceOrInsert(&CacheItem{Key: key, Exists: true})
 }
 
 // Iterator() returns a new iterator for merged iteration of both the in-memory operations and parent store with the given prefix
@@ -337,7 +337,7 @@ type TxnIterator struct {
 // newTxnIterator() initializes a new merged iterator for traversing both the in-memory operations and parent store
 func newTxnIterator(parent lib.IteratorI, t txn, parentPrefix, prefix []byte, reverse bool) *TxnIterator {
 	tree := NewBTreeIterator(t.sorted.Clone(),
-		&TreeItem{
+		&CacheItem{
 			Key: lib.BytesToString(parentPrefix) + lib.BytesToString(prefix),
 		},
 		reverse)
@@ -496,7 +496,7 @@ func (ti *TxnIterator) txnNext() {
 
 // seek() positions the iterator at the first entry that matches or exceeds the prefix.
 func (ti *TxnIterator) seek() *TxnIterator {
-	ti.tree.Move(&TreeItem{
+	ti.tree.Move(&CacheItem{
 		Key: ti.parentPrefix + ti.prefix,
 	})
 	return ti
@@ -506,7 +506,7 @@ func (ti *TxnIterator) seek() *TxnIterator {
 func (ti *TxnIterator) revSeek() *TxnIterator {
 	bz, _ := lib.StringToBytes(ti.parentPrefix + ti.prefix)
 	endPrefix := lib.BytesToString(prefixEnd(bz))
-	ti.tree.Move(&TreeItem{
+	ti.tree.Move(&CacheItem{
 		Key: endPrefix,
 	})
 	return ti
@@ -752,30 +752,31 @@ func seekLast(it *badger.Iterator, prefix []byte) {
 
 // BTREE ITERATOR CODE BELOW
 
-type TreeItem struct {
+type CacheItem struct {
 	Key    string
 	Exists bool
 }
 
-func (ti TreeItem) Less(than *TreeItem) bool {
+func (ti CacheItem) Less(than *CacheItem) bool {
 	// compare the keys lexicographically
 	return ti.Key < than.Key
 }
 
 // BTreeIterator provides external iteration over a btree
 type BTreeIterator struct {
-	tree    *btree.BTreeG[*TreeItem] // the btree to iterate over
-	current *TreeItem                // current item in the iteration
-	reverse bool                     // whether the iteration is in reverse order
+	tree    *btree.BTreeG[*CacheItem] // the btree to iterate over
+	current *CacheItem                // current item in the iteration
+	reverse bool                      // whether the iteration is in reverse order
 }
 
 // NewBTreeIterator() creates a new iterator starting at the closest item to the given key
-func NewBTreeIterator(tree *btree.BTreeG[*TreeItem], start *TreeItem, reverse bool) *BTreeIterator {
+func NewBTreeIterator(tree *btree.BTreeG[*CacheItem], start *CacheItem, reverse bool) *BTreeIterator {
+	// create a new BTreeIterator
 	bt := &BTreeIterator{
 		tree:    tree,
 		reverse: reverse,
 	}
-
+	// if no start item is provided, set the iterator to the first or last item based on the direction
 	if start == nil || start.Key == "" {
 		if reverse {
 			val, _ := tree.Max()
@@ -786,61 +787,61 @@ func NewBTreeIterator(tree *btree.BTreeG[*TreeItem], start *TreeItem, reverse bo
 		}
 		return bt
 	}
-
+	// otherwise, move the iterator to that item
 	bt.Move(start)
-
 	return bt
 }
 
-// Move() moves the iterator to the given key or the closest item if the key is not found.
-func (bi *BTreeIterator) Move(item *TreeItem) {
+// Move() moves the iterator to the given key or the closest item if the key is not found
+func (bi *BTreeIterator) Move(item *CacheItem) {
 	// reset the current item
 	bi.current = nil
-
 	// try to get an exact match
-	exactMatch, ok := bi.tree.Get(item)
-	if ok {
+	if exactMatch, ok := bi.tree.Get(item); ok {
 		bi.current = exactMatch
 		return
 	}
-
 	// if no exact match, find the closest item based on the direction of iteration
 	if bi.reverse {
-		bi.current = &TreeItem{Key: item.Key + string(endBytes)}
+		bi.current = &CacheItem{Key: item.Key + string(endBytes)}
 		bi.current = bi.prev()
 	} else {
-		bi.current = &TreeItem{Key: item.Key}
+		bi.current = &CacheItem{Key: item.Key}
 		bi.current = bi.next()
 	}
 }
 
-// Current returns the current item
-func (bi *BTreeIterator) Current() *TreeItem {
+// Current() returns the current item in the iteration
+func (bi *BTreeIterator) Current() *CacheItem {
+	// if current is nil, return an empty Item to avoid nil pointer dereference
 	if bi.current == nil {
-		return &TreeItem{Key: "", Exists: false}
+		return &CacheItem{Key: "", Exists: false}
 	}
 	return bi.current
 }
 
-// Next advances to the next item in the tree
-func (bi *BTreeIterator) Next() *TreeItem {
+// Next() advances to the next item in the tree
+func (bi *BTreeIterator) Next() *CacheItem {
+	// check if current exist, otherwise the iterator is invalid
 	if bi.current == nil {
 		return nil
 	}
+	// go to the next item based on the direction of iteration
 	if bi.reverse {
 		bi.current = bi.prev()
 	} else {
 		bi.current = bi.next()
 	}
+	// return the current item which is the possible next item in the iteration
 	return bi.Current()
 }
 
-func (bi *BTreeIterator) next() *TreeItem {
-	var nextItem *TreeItem
+// next() finds the next item in the tree based on the current item
+func (bi *BTreeIterator) next() *CacheItem {
+	var nextItem *CacheItem
 	var found bool
-
-	// Find the next item
-	bi.tree.AscendGreaterOrEqual(bi.current, func(item *TreeItem) bool {
+	// find the next item
+	bi.tree.AscendGreaterOrEqual(bi.current, func(item *CacheItem) bool {
 		nextItem = item
 		if nextItem.Key != bi.current.Key {
 			found = true
@@ -848,34 +849,36 @@ func (bi *BTreeIterator) next() *TreeItem {
 		}
 		return true
 	})
-
+	// if the item found, return it
 	if found {
 		return nextItem
 	}
-
 	// no next item
 	return nil
 }
 
-// Prev moves to the previous item in the tree
-func (bi *BTreeIterator) Prev() *TreeItem {
+// Prev() back towards the previous item in the tree
+func (bi *BTreeIterator) Prev() *CacheItem {
+	// check if current exist, otherwise the iterator is invalid
 	if bi.current == nil {
 		return nil
 	}
+	// go to the previous item based on the direction of iteration
 	if bi.reverse {
 		bi.current = bi.next()
 	} else {
 		bi.current = bi.prev()
 	}
+	// return the current item which is the possible previous item in the iteration
 	return bi.Current()
 }
 
-func (bi *BTreeIterator) prev() *TreeItem {
-	var prevItem *TreeItem
+// next() finds the previous item in the tree based on the current item
+func (bi *BTreeIterator) prev() *CacheItem {
+	var prevItem *CacheItem
 	var found bool
-
-	// Find the previous item
-	bi.tree.DescendLessOrEqual(bi.current, func(item *TreeItem) bool {
+	// find the previous item
+	bi.tree.DescendLessOrEqual(bi.current, func(item *CacheItem) bool {
 		prevItem = item
 		if prevItem.Less(bi.current) {
 			found = true
@@ -883,16 +886,15 @@ func (bi *BTreeIterator) prev() *TreeItem {
 		}
 		return true
 	})
-
+	// if the item found, return it
 	if found {
 		return prevItem
 	}
-
 	// no previous item
 	return nil
 }
 
-// HasNext returns true if there are more items after the current one
+// HasNext() returns true if there are more items after current
 func (bi *BTreeIterator) HasNext() bool {
 	if bi.reverse {
 		return bi.hasPrev()
@@ -900,6 +902,7 @@ func (bi *BTreeIterator) HasNext() bool {
 	return bi.hasNext()
 }
 
+// hasNext() checks if there is a next item in the iteration
 func (bi *BTreeIterator) hasNext() bool {
 	if bi.current == nil {
 		return false
@@ -907,7 +910,7 @@ func (bi *BTreeIterator) hasNext() bool {
 	return bi.next() != nil
 }
 
-// HasPrev returns true if there are items before the current one
+// HasPrev() returns true if there are items before current
 func (bi *BTreeIterator) HasPrev() bool {
 	if bi.reverse {
 		return bi.hasNext()
@@ -915,6 +918,7 @@ func (bi *BTreeIterator) HasPrev() bool {
 	return bi.hasPrev()
 }
 
+// hasPrev() checks if there is a previous item in the iteration
 func (bi *BTreeIterator) hasPrev() bool {
 	if bi.current == nil {
 		return false

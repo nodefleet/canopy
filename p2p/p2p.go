@@ -212,7 +212,7 @@ func (p *P2P) Dial(address *lib.PeerAddress, disconnect, strictPublicKey bool) l
 	if p.IsSelf(address) || p.PeerSet.Has(address.PublicKey) {
 		return nil
 	}
-	p.log.Debugf("Dialing %s@%s", lib.BytesToString(address.PublicKey), address.NetAddress)
+	// p.log.Debugf("Dialing %s@%s", lib.BytesToString(address.PublicKey), address.NetAddress)
 	// try to establish the basic tcp connection
 	conn, er := net.DialTimeout(transport, address.NetAddress, dialTimeout)
 	if er != nil {
@@ -303,7 +303,7 @@ func (p *P2P) AddPeer(conn net.Conn, info *lib.PeerInfo, disconnect, strictPubli
 func (p *P2P) DialWithBackoff(peerInfo *lib.PeerAddress, strictPublicKey bool) {
 	dialAndLog := func() (err error) {
 		if err = p.Dial(peerInfo, false, strictPublicKey); err != nil {
-			p.log.Errorf("Dial %s@%s failed: %s", lib.BytesToString(peerInfo.PublicKey), peerInfo.NetAddress, err.Error())
+			// p.log.Errorf("Dial %s@%s failed: %s", lib.BytesToString(peerInfo.PublicKey), peerInfo.NetAddress, err.Error())
 		}
 		return
 	}

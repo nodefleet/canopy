@@ -2,9 +2,10 @@ package fsm
 
 import (
 	"encoding/json"
+	"sort"
+
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
-	"sort"
 )
 
 /* This file defines the account, pool, and supply tracker state interactions */
@@ -100,6 +101,7 @@ func (s *StateMachine) SetAccounts(accounts []*Account, supply *Supply) (err lib
 		// add the account amount to the supply object
 		supply.Total += acc.Amount
 		// set the account in state
+		s.genesisChan <- accountNick
 		if err = s.SetAccount(acc); err != nil {
 			return
 		}

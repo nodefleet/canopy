@@ -3,12 +3,13 @@ package lib
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"time"
+
 	"github.com/canopy-network/canopy/lib/crypto"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"net/http"
-	"time"
 )
 
 /* This file implements dev-ops telemetry for the node in the form of prometheus metrics */
@@ -76,12 +77,12 @@ type NodeMetrics struct {
 
 // BlockMetrics represents telemetry for block health
 type BlockMetrics struct {
-	BlockProcessingTime prometheus.Histogram // how long does it take for this node to commit a block?
-	BlockSize           prometheus.Gauge     // what is the size of the block in bytes?
-	BlockNumTxs         prometheus.Counter   // how many transactions has the node processed?
-	LargestTxSize       prometheus.Gauge     // what is the largest tx size in a block?
-	BlockVDFIterations  prometheus.Gauge     // how many vdf iterations are included in the block?
-	NonSignerPercent    prometheus.Gauge     // what percent of the voting power were non signers
+	BlockProcessingTime prometheus.Gauge   // how long does it take for this node to commit a block?
+	BlockSize           prometheus.Gauge   // what is the size of the block in bytes?
+	BlockNumTxs         prometheus.Counter // how many transactions has the node processed?
+	LargestTxSize       prometheus.Gauge   // what is the largest tx size in a block?
+	BlockVDFIterations  prometheus.Gauge   // how many vdf iterations are included in the block?
+	NonSignerPercent    prometheus.Gauge   // what percent of the voting power were non signers
 }
 
 // PeerMetrics represents the telemetry for the P2P module
@@ -117,7 +118,7 @@ type FSMMetrics struct {
 
 // StoreMetrics represents the telemetry of the 'store' package
 type StoreMetrics struct {
-	DBPartitionTime      prometheus.Histogram // how long does the db partition take?
+	DBPartitionTime      prometheus.Gauge     // how long does the db partition take?
 	DBFlushPartitionTime prometheus.Histogram // how long does the db partition flush take?
 	DBPartitionEntries   prometheus.Gauge     // how many entries in the partition batch?
 	DBPartitionSize      prometheus.Gauge     // how big is the partition batch?
@@ -166,7 +167,7 @@ func NewMetricsServer(nodeAddress crypto.AddressI, config MetricsConfig) *Metric
 		},
 		// BLOCK
 		BlockMetrics: BlockMetrics{
-			BlockProcessingTime: promauto.NewHistogram(prometheus.HistogramOpts{
+			BlockProcessingTime: promauto.NewGauge(prometheus.GaugeOpts{
 				Name: "canopy_block_processing_time",
 				Help: "The time it takes to process a received canopy block in seconds",
 			}),
@@ -278,7 +279,7 @@ func NewMetricsServer(nodeAddress crypto.AddressI, config MetricsConfig) *Metric
 		},
 		// STORE
 		StoreMetrics: StoreMetrics{
-			DBPartitionTime: promauto.NewHistogram(prometheus.HistogramOpts{
+			DBPartitionTime: promauto.NewGauge(prometheus.GaugeOpts{
 				Name: "canopy_store_partition_time",
 				Help: "Execution time of the database partition",
 			}),
@@ -480,7 +481,7 @@ func (m *Metrics) UpdateStoreMetrics(size, entries int64, startTime time.Time, s
 		// update the processing time in seconds
 		m.DBFlushPartitionTime.Observe(time.Since(startFlushTime).Seconds())
 		// update the processing time in seconds
-		m.DBPartitionTime.Observe(time.Since(startTime).Seconds())
+		m.DBPartitionTime.Set(time.Since(startTime).Seconds())
 	} else {
 		// updates the size in bytes
 		m.DBCommitSize.Set(float64(size))
@@ -505,7 +506,7 @@ func (m *Metrics) UpdateBlockMetrics(proposerAddress []byte, blockSize, txCount,
 	// update the number of transactions
 	m.BlockNumTxs.Add(float64(txCount))
 	// update the block processing time in seconds
-	m.BlockProcessingTime.Observe(duration.Seconds())
+	m.BlockProcessingTime.Set(duration.Seconds())
 	// update block size
 	m.BlockSize.Set(float64(blockSize))
 	// update the block vdf iterations

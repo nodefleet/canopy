@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"slices"
+	"time"
 
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
@@ -75,6 +76,62 @@ import (
 //                1110  1111
 //
 // =====================================================
+//
+
+type SMTStat struct {
+	duration time.Duration
+	rehashes uint32
+	hashTime time.Duration
+}
+
+func (s *SMT) logData() {
+	logger := lib.NewDefaultLogger()
+	quit := make(chan struct{})
+
+	stats := make([]SMTStat, 0)
+
+	go func() {
+		for stat := range s.statsChan {
+			stats = append(stats, stat)
+		}
+		close(quit)
+	}()
+
+	go func() {
+		interval := 5 * time.Second
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if len(stats) == 0 {
+					continue
+				}
+
+				var totalDuration time.Duration
+				var totalHashTime time.Duration
+				var totalRehashes uint32
+
+				for _, stat := range stats {
+					totalDuration += stat.duration
+					totalHashTime += stat.hashTime
+					totalRehashes += stat.rehashes
+				}
+				avgDuration := totalDuration / time.Duration(len(stats))
+				avgHashTime := totalHashTime / time.Duration(len(stats))
+				avgRehashes := totalRehashes / uint32(len(stats))
+
+				logger.Infof("[SMT] Avgs: OpDuration: %s | HashTime: %s | Rehashes: %d",
+					avgDuration, avgHashTime, avgRehashes)
+				// stats = make([]SMTStat, 5000)
+				stats = make([]SMTStat, 0, 5000)
+			case <-quit:
+				return
+			}
+		}
+	}()
+}
 
 const MaxKeyBitLength = 160 // the maximum leaf key bits (20 bytes)
 
@@ -88,6 +145,9 @@ type SMT struct {
 
 	// OpData: data for each operation
 	OpData
+
+	statsChan chan SMTStat
+	stat      SMTStat
 }
 
 // node wraps protobuf Node with a key
@@ -133,7 +193,9 @@ func NewSMT(rootKey []byte, keyBitLen int, store lib.RWStoreI) (smt *SMT) {
 	smt = &SMT{
 		store:        store,
 		keyBitLength: keyBitLen,
+		statsChan:    make(chan SMTStat),
 	}
+	go smt.logData()
 	// ensure the root key is the proper length based on the bit count
 	rKey := newNodeKey(bytes.Clone(rootKey), keyBitLen)
 	// get the root from the store
@@ -153,6 +215,17 @@ func (s *SMT) Root() []byte { return bytes.Clone(s.root.Value) }
 
 // Set: insert or update a target
 func (s *SMT) Set(k, v []byte) lib.ErrorI {
+	start := time.Now()
+	s.stat = SMTStat{
+		duration: 0,
+		rehashes: 0,
+		hashTime: 0,
+	}
+	defer func() {
+		s.stat.duration = time.Since(start)
+		s.statsChan <- s.stat
+	}()
+
 	// calculate the key and value to upsert
 	s.target = &node{Key: newNodeKey(crypto.Hash(k), s.keyBitLength), Node: lib.Node{Value: crypto.Hash(v)}}
 	// check to make sure the target is valid
@@ -196,6 +269,16 @@ func (s *SMT) Set(k, v []byte) lib.ErrorI {
 
 // Delete: removes a target node if exists in the tree
 func (s *SMT) Delete(k []byte) lib.ErrorI {
+	start := time.Now()
+	s.stat = SMTStat{
+		duration: 0,
+		rehashes: 0,
+		hashTime: 0,
+	}
+	defer func() {
+		s.stat.duration = time.Since(start)
+		s.statsChan <- s.stat
+	}()
 	// calculate the key and value to upsert
 	s.target = &node{Key: newNodeKey(crypto.Hash(k), s.keyBitLength)}
 	// check to make sure the target is valid
@@ -271,6 +354,7 @@ func (s *SMT) rehash() lib.ErrorI {
 	// create a convenience variable for the max index of the array
 	maxIdx := len(s.traversed.Nodes) - 1
 	// iterate the traversed list from end to start
+	s.stat.rehashes = uint32(maxIdx + 1)
 	for i := maxIdx; i >= 0; i-- {
 		// child stores the cached from the parent that was traversed
 		var child *node
@@ -346,7 +430,9 @@ func (s *SMT) updateParentValue(parent, child *node) (err lib.ErrorI) {
 		return err
 	}
 	// concatenate the left and right children values; update the parents value
+	now := time.Now()
 	parent.Value = crypto.Hash(append(leftChildInput, rightChildInput...))
+	s.stat.hashTime += time.Since(now)
 	// save the updated root value to the structure
 	if bytes.Equal(parent.Key.bytes(), s.root.Key.bytes()) {
 		s.root = parent.copy()
