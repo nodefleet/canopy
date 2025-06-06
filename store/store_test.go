@@ -261,7 +261,7 @@ func TestPartition(t *testing.T) {
 	defer reader.Discard()
 	writer := store.db.NewWriteBatchAt(0)
 	partitionPrefix := historicalPrefix(partitionHeight(store.Version()))
-	hss := NewBadgerTxn(reader, writer, []byte(partitionPrefix), store.log)
+	hss := NewBadgerTxn(reader, writer, []byte(partitionPrefix), false, store.log)
 	value, err := hss.Get([]byte(partitionExistsKey))
 	require.NoError(t, err)
 	require.Equal(t, []byte(partitionExistsKey), value)
@@ -345,7 +345,7 @@ func TestPartitionIntegration(t *testing.T) {
 	writer := store.db.NewWriteBatchAt(0)
 	defer writer.Cancel()
 	partitionPrefix := historicalPrefix(partitionHeight(store.Version()))
-	hss := NewBadgerTxn(reader, writer, []byte(partitionPrefix), store.log)
+	hss := NewBadgerTxn(reader, writer, []byte(partitionPrefix), false, store.log)
 	value, err := hss.Get([]byte(partitionExistsKey))
 	require.NoError(t, err)
 	require.Equal(t, []byte(partitionExistsKey), value)
@@ -375,7 +375,7 @@ func TestPartitionIntegration(t *testing.T) {
 	finalSnapshotHeight := partitionHeight(store.Version())
 
 	tx := db.NewTransactionAt(finalSnapshotHeight, true)
-	archiveStore := NewBadgerTxn(tx, writer, []byte(latestStatePrefix), lib.NewDefaultLogger())
+	archiveStore := NewBadgerTxn(tx, writer, []byte(latestStatePrefix), false, lib.NewDefaultLogger())
 	defer archiveStore.Close()
 
 	// use an archive iterator to iterate through the deleted keys

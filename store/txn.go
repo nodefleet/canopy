@@ -100,6 +100,7 @@ type Txn struct {
 	writer TxnWriterI  // memory store to Write() to
 	prefix []byte      // prefix for keys in this txn
 	logger lib.LoggerI // logger for this txn
+	sort   bool        // whether to sort the keys in the cache; used for iteration
 	cache  txn
 }
 
@@ -144,15 +145,16 @@ type valueOp struct {
 }
 
 // NewBadgerTxn() creates a new instance of Txn from badger Txn and WriteBatch correspondingly
-func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, logger lib.LoggerI) *Txn {
+func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, sort bool, logger lib.LoggerI) *Txn {
 	return &Txn{
 		reader: BadgerTxnReader{reader, prefix},
 		writer: BadgerTxnWriter{writer},
 		prefix: prefix,
 		logger: logger,
+		sort:   sort,
 		cache: txn{
 			ops: make(map[string]valueOp),
-			sorted: btree.NewG(48, func(a, b *CacheItem) bool {
+			sorted: btree.NewG(32, func(a, b *CacheItem) bool {
 				return a.Less(b)
 			}), // need to benchmark this value
 		},
@@ -160,17 +162,18 @@ func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, 
 }
 
 // NewTxn() creates a new instance of Txn with the specified reader and writer
-func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, logger lib.LoggerI) *Txn {
+func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, sort bool, logger lib.LoggerI) *Txn {
 	return &Txn{
 		reader: reader,
 		writer: writer,
 		prefix: prefix,
 		logger: logger,
+		sort:   sort,
 		cache: txn{
 			ops: make(map[string]valueOp),
-			sorted: btree.NewG(48, func(a, b *CacheItem) bool {
+			sorted: btree.NewG(32, func(a, b *CacheItem) bool {
 				return a.Less(b)
-			}),
+			}), // need to benchmark this value
 		},
 	}
 }
@@ -215,7 +218,7 @@ func (t *Txn) SetEntry(entry *badger.Entry) lib.ErrorI {
 // lexicographical order.
 // NOTE: update() won't modify the key itself, any key prefixing must be done before calling this
 func (t *Txn) update(key string, v []byte, opAction op) {
-	if _, found := t.cache.ops[key]; !found {
+	if _, found := t.cache.ops[key]; !found && t.sort {
 		t.addToSorted(key)
 	}
 	t.cache.ops[key] = valueOp{value: v, op: opAction}
@@ -225,7 +228,7 @@ func (t *Txn) update(key string, v []byte, opAction op) {
 // lexicographical order.
 // NOTE: updateEntry() won't modify the key itself, any key prefixing must be done before calling this
 func (t *Txn) updateEntry(key string, v *badger.Entry) {
-	if _, found := t.cache.ops[key]; !found {
+	if _, found := t.cache.ops[key]; !found && t.sort {
 		t.addToSorted(key)
 	}
 	t.cache.ops[key] = valueOp{valueEntry: v, op: opEntry}
@@ -256,7 +259,7 @@ func (t *Txn) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
 
 // Discard() clears all in-memory operations and resets the sorted key list
 func (t *Txn) Discard() {
-	t.cache.sorted.Clear(true)
+	t.cache.sorted.Clear(false)
 	t.cache.ops, t.cache.sortedLen = make(map[string]valueOp), 0
 }
 
