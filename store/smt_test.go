@@ -2172,7 +2172,7 @@ func NewTestSMT(t *testing.T, preset *NodeList, root []byte, keyBitSize int) (*S
 	// make a writable reader that reads from the last height
 	reader := db.NewTransactionAt(1, true)
 	writer := db.NewWriteBatchAt(1)
-	memStore := NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), lib.NewDefaultLogger())
+	memStore := NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), false, lib.NewDefaultLogger())
 	// if there's no preset - use the default 3 nodes
 	if preset == nil {
 		if root != nil {
