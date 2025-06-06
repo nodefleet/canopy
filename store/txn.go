@@ -152,7 +152,7 @@ func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, 
 		logger: logger,
 		cache: txn{
 			ops: make(map[string]valueOp),
-			sorted: btree.NewG(48, func(a, b *CacheItem) bool {
+			sorted: btree.NewG(32, func(a, b *CacheItem) bool {
 				return a.Less(b)
 			}), // need to benchmark this value
 		},
@@ -168,9 +168,9 @@ func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, logger lib.Logg
 		logger: logger,
 		cache: txn{
 			ops: make(map[string]valueOp),
-			sorted: btree.NewG(48, func(a, b *CacheItem) bool {
+			sorted: btree.NewG(32, func(a, b *CacheItem) bool {
 				return a.Less(b)
-			}),
+			}), // need to benchmark this value
 		},
 	}
 }
@@ -256,7 +256,7 @@ func (t *Txn) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
 
 // Discard() clears all in-memory operations and resets the sorted key list
 func (t *Txn) Discard() {
-	t.cache.sorted.Clear(true)
+	t.cache.sorted.Clear(false)
 	t.cache.ops, t.cache.sortedLen = make(map[string]valueOp), 0
 }
 
