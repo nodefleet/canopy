@@ -29,6 +29,7 @@ type StateMachine struct {
 	Config             lib.Config            // the main configuration as defined by the 'config.json' file
 	Metrics            *lib.Metrics          // the telemetry module
 	log                lib.LoggerI           // the logger for standard output and debugging
+	genesisChan        chan string           // channel to receive genesis data
 }
 
 // New() creates a new instance of a StateMachine
@@ -43,6 +44,7 @@ func New(c lib.Config, store lib.StoreI, metrics *lib.Metrics, log lib.LoggerI) 
 		Config:            c,
 		Metrics:           metrics,
 		log:               log,
+		genesisChan:       make(chan string, 5000),
 	}
 	// initialize the state machine and exit
 	return sm, sm.Initialize(store)
@@ -55,7 +57,10 @@ func (s *StateMachine) Initialize(store lib.StoreI) (err lib.ErrorI) {
 	// if height is genesis
 	if s.height == 0 {
 		// then initialize from a genesis file
-		return s.NewFromGenesisFile()
+		now := time.Now()
+		err = s.NewFromGenesisFile()
+		s.log.Infof("Time it took to set up genesis: %s", time.Since(now).String())
+		return
 	}
 	// load the previous block
 	blk, e := s.LoadBlock(s.Height() - 1)

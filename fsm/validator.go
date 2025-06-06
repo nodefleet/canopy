@@ -3,9 +3,10 @@ package fsm
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
+
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
-	"slices"
 )
 
 /* This file implements state actions on Validators and Delegators*/
@@ -129,6 +130,7 @@ func (s *StateMachine) GetValidatorsPaginated(p lib.PageParams, f lib.ValidatorF
 func (s *StateMachine) SetValidators(validators []*Validator, supply *Supply) lib.ErrorI {
 	// for each validator in the list
 	for _, val := range validators {
+		s.genesisChan <- validatorNick
 		// if the unstaking height or the max paused height is set
 		if val.UnstakingHeight != 0 {
 			// if the validator is unstaking - update it accordingly in state

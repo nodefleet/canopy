@@ -73,7 +73,7 @@ func (c *Controller) Sync() {
 	// set the Controller as 'syncing'
 	c.isSyncing.Store(true)
 	// check if node is alone in the validator set
-	if c.singleNodeNetwork() {
+	if true {
 		// complete syncing
 		c.finishSyncing()
 		// exit

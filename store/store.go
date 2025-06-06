@@ -28,7 +28,7 @@ const (
 
 // maximum size of the database (batch) transaction
 var maxTransactionSize = int64(
-	math.Ceil(float64(128*units.MB) / badgerDBMaxBatchScalingFactor),
+	math.Ceil(float64(5*units.GB) / badgerDBMaxBatchScalingFactor),
 )
 
 var _ lib.StoreI = &Store{} // enforce the Store interface
@@ -65,7 +65,67 @@ performed atomically in a single commit operation per height. Additionally, the 
 lexicographically ordered prefix keys to facilitate easy and efficient iteration over stored data.
 */
 
+type StoreStat struct {
+	store    string
+	duration time.Duration
+}
+
+func (s *Store) logData() {
+	logger := lib.NewDefaultLogger()
+	quit := make(chan struct{})
+	stats := make([]StoreStat, 0)
+
+	go func() {
+		for stat := range s.statsChan {
+			stats = append(stats, stat)
+		}
+		close(quit)
+	}()
+
+	go func() {
+		interval := 5 * time.Second
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if len(stats) == 0 {
+					continue
+				}
+
+				type statType struct {
+					duration time.Duration
+					total    int
+				}
+
+				st := map[string]statType{}
+				st[stateCommitIDPrefix] = statType{}
+				st[latestStatePrefix] = statType{}
+				st[historicStatePrefix] = statType{}
+				for _, stat := range stats {
+					st[stat.store] = statType{
+						duration: st[stat.store].duration + stat.duration,
+						total:    st[stat.store].total + 1,
+					}
+				}
+
+				lssAvg := st[latestStatePrefix].duration / time.Duration(st[latestStatePrefix].total)
+				hssAvg := st[historicStatePrefix].duration / time.Duration(st[historicStatePrefix].total)
+				scAvg := st[stateCommitmentPrefix].duration / time.Duration(st[stateCommitmentPrefix].total)
+
+				logger.Infof("[Store] Avg Set Time: LSS: %s | HSS: %s | SC: %s",
+					lssAvg, hssAvg, scAvg)
+				stats = make([]StoreStat, 0)
+			case <-quit:
+				return
+			}
+		}
+	}()
+}
+
 type Store struct {
+	statsChan           chan StoreStat
 	version             uint64             // version of the store
 	root                []byte             // root associated with the CommitID at this version
 	db                  *badger.DB         // underlying database
@@ -94,13 +154,12 @@ func NewStore(path string, metrics *lib.Metrics, log lib.LoggerI) (lib.StoreI, l
 	// use badger DB in managed mode to allow easy versioning
 	// memTableSize is set to 1.28GB (max) to allow 128MB (10%) of writes in a
 	// single batch. It is seemingly unknown why the 10% limit is set
+	now := time.Now()
+	log.Info("opening new store DB")
 	// https://discuss.dgraph.io/t/discussion-badgerdb-should-offer-arbitrarily-sized-atomic-transactions/8736
-	db, err := badger.OpenManaged(
-		badger.DefaultOptions(path).
-			WithNumVersionsToKeep(math.MaxInt64).
-			WithLoggingLevel(badger.ERROR).
-			WithMemTableSize(maxTransactionSize),
-	)
+	db, err := badger.OpenManaged(badger.DefaultOptions(path).WithNumVersionsToKeep(math.MaxInt64).
+		WithLoggingLevel(badger.ERROR).WithMemTableSize(maxTransactionSize))
+	log.Infof("opened new store DB, took: %s", time.Since(now).String())
 	if err != nil {
 		return nil, ErrOpenDB(err)
 	}
@@ -130,19 +189,22 @@ func NewStoreWithDB(db *badger.DB, metrics *lib.Metrics, log lib.LoggerI, write 
 	// be set at the commit time
 	writer := db.NewWriteBatchAt(id.Height + 1)
 	// return the store object
-	return &Store{
-		version: id.Height,
-		log:     log,
-		db:      db,
-		reader:  reader,
-		writer:  writer,
-		lss:     NewBadgerTxn(reader, writer, []byte(latestStatePrefix), log),
-		hss:     NewBadgerTxn(reader, writer, historicalPrefix(id.Height), log),
-		sc:      NewDefaultSMT(NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), log)),
-		Indexer: &Indexer{NewBadgerTxn(reader, writer, []byte(indexerPrefix), log)},
-		metrics: metrics,
-		root:    id.Root,
-	}, nil
+	st := &Store{
+		version:   id.Height,
+		log:       log,
+		db:        db,
+		reader:    reader,
+		writer:    writer,
+		lss:       NewBadgerTxn(reader, writer, []byte(latestStatePrefix), log),
+		hss:       NewBadgerTxn(reader, writer, historicalPrefix(id.Height), log),
+		sc:        NewDefaultSMT(NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), log)),
+		Indexer:   &Indexer{NewBadgerTxn(reader, writer, []byte(indexerPrefix), log)},
+		metrics:   metrics,
+		root:      id.Root,
+		statsChan: make(chan StoreStat, 5000),
+	}
+	st.logData()
+	return st, nil
 }
 
 // NewReadOnly() returns a store without a writer - meant for historical read only queries
@@ -173,6 +235,7 @@ func (s *Store) NewReadOnly(queryVersion uint64) (lib.StoreI, lib.ErrorI) {
 		useHistorical: useHistorical,
 		metrics:       s.metrics,
 		root:          bytes.Clone(s.root),
+		statsChan:     make(chan StoreStat, 5000),
 	}, nil
 }
 
@@ -183,17 +246,18 @@ func (s *Store) Copy() (lib.StoreI, lib.ErrorI) {
 	reader := s.db.NewTransactionAt(s.version, false)
 	writer := s.db.NewWriteBatchAt(s.version + 1)
 	return &Store{
-		version: s.version,
-		log:     s.log,
-		db:      s.db,
-		reader:  reader,
-		writer:  writer,
-		lss:     NewBadgerTxn(reader, writer, []byte(latestStatePrefix), s.log),
-		hss:     NewBadgerTxn(reader, writer, historicalPrefix(s.version), s.log),
-		sc:      NewDefaultSMT(NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), s.log)),
-		Indexer: &Indexer{NewBadgerTxn(reader, writer, []byte(indexerPrefix), s.log)},
-		metrics: s.metrics,
-		root:    bytes.Clone(s.root),
+		version:   s.version,
+		log:       s.log,
+		db:        s.db,
+		reader:    reader,
+		writer:    writer,
+		lss:       NewBadgerTxn(reader, writer, []byte(latestStatePrefix), s.log),
+		hss:       NewBadgerTxn(reader, writer, historicalPrefix(s.version), s.log),
+		sc:        NewDefaultSMT(NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), s.log)),
+		Indexer:   &Indexer{NewBadgerTxn(reader, writer, []byte(indexerPrefix), s.log)},
+		metrics:   s.metrics,
+		root:      bytes.Clone(s.root),
+		statsChan: make(chan StoreStat, 5000),
 	}, nil
 }
 
@@ -215,6 +279,7 @@ func (s *Store) Commit() (root []byte, err lib.ErrorI) {
 	if e := s.Write(); e != nil {
 		return nil, err
 	}
+	s.log.Infof("flushing batch writer to disk, version: %d size %d count %d", s.version, size, entries)
 	if e := s.writer.Flush(); e != nil {
 		return nil, ErrCommitDB(e)
 	}
@@ -226,15 +291,19 @@ func (s *Store) Commit() (root []byte, err lib.ErrorI) {
 
 // Write() writes the current state to the batch writer without committing it.
 func (s *Store) Write() lib.ErrorI {
+	s.log.Infof("writing to lss writer, len: %d", s.lss.cache.sortedLen)
 	if e := s.lss.Write(); e != nil {
 		return ErrCommitDB(e)
 	}
+	s.log.Infof("writing to hss writer, len: %d", s.hss.cache.sortedLen)
 	if e := s.hss.Write(); e != nil {
 		return ErrCommitDB(e)
 	}
+	s.log.Infof("writing to indexer writer, len: %d", s.Indexer.db.cache.sortedLen)
 	if e := s.Indexer.db.Write(); e != nil {
 		return ErrCommitDB(e)
 	}
+	s.log.Infof("writing to sc writer, len: %d", s.sc.store.(*Txn).cache.sortedLen)
 	if er := s.sc.store.(TxnWriterI).Write(); er != nil {
 		return ErrCommitDB(er)
 	}
@@ -395,15 +464,33 @@ func (s *Store) Get(key []byte) ([]byte, lib.ErrorI) {
 // as well as the value hash in the StateCommitStore referenced by the 'key' and hash('key') respectively
 func (s *Store) Set(k, v []byte) lib.ErrorI {
 	// set in the state store @ latest
+	now := time.Now()
 	if err := s.lss.Set(k, v); err != nil {
 		return err
 	}
+	s.statsChan <- StoreStat{
+		store:    latestStatePrefix,
+		duration: time.Since(now),
+	}
+	now = time.Now()
 	// set in the state store @ historical partition
 	if err := s.hss.Set(k, v); err != nil {
 		return err
 	}
+	s.statsChan <- StoreStat{
+		store:    historicStatePrefix,
+		duration: time.Since(now),
+	}
+	now = time.Now()
 	// set in the state commit store
-	return s.sc.Set(k, v)
+	if err := s.sc.Set(k, v); err != nil {
+		return err
+	}
+	s.statsChan <- StoreStat{
+		store:    stateCommitmentPrefix,
+		duration: time.Since(now),
+	}
+	return nil
 }
 
 // Delete() removes the key-value pair from both the LatestStateStore, HistoricalStateStore, and CommitStore
@@ -470,10 +557,11 @@ func (s *Store) NewTxn() lib.StoreI {
 		hss:     NewTxn(s.hss, s.hss, nil, s.log),
 		// the current implementation uses Txn as the reader and writer for the SMT. so this won't
 		// fail, should be revised if the SMT store is ever changed
-		sc:      NewDefaultSMT(NewTxn(s.sc.store.(TxnReaderI), s.sc.store.(TxnWriterI), nil, s.log)),
-		Indexer: &Indexer{NewTxn(s.Indexer.db, s.Indexer.db, nil, s.log)},
-		metrics: s.metrics,
-		root:    bytes.Clone(s.root),
+		sc:        NewDefaultSMT(NewTxn(s.sc.store.(TxnReaderI), s.sc.store.(TxnWriterI), nil, s.log)),
+		Indexer:   &Indexer{NewTxn(s.Indexer.db, s.Indexer.db, nil, s.log)},
+		metrics:   s.metrics,
+		root:      bytes.Clone(s.root),
+		statsChan: make(chan StoreStat, 5000),
 	}
 }
 

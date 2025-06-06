@@ -2,22 +2,85 @@ package fsm
 
 import (
 	"encoding/json"
-	"github.com/canopy-network/canopy/lib"
-	"github.com/canopy-network/canopy/lib/crypto"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
+
+	"github.com/canopy-network/canopy/lib"
+	"github.com/canopy-network/canopy/lib/crypto"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 )
 
 /* GENESIS LOGIC: implements logic to import a json file to create the state at height 0 and export the state at any height */
 
-// NewFromGenesisFile() creates a new beginning state from a file
+const (
+	validatorNick = "validator"
+	accountNick   = "account"
+)
+
+// logGenesisProgress logs the progress of the genesis state accounts/validators creation
+func (s *StateMachine) logGenesisProgress() {
+	start := time.Now()
+	var accounts, validators uint32
+	lastAccounts, lastValidators := uint32(0), uint32(0)
+	quit := make(chan struct{})
+
+	go func() {
+		for nickname := range s.genesisChan {
+			switch nickname {
+			case accountNick:
+				atomic.AddUint32(&accounts, 1)
+			case validatorNick:
+				atomic.AddUint32(&validators, 1)
+			default:
+				fmt.Println("Unknown data type received:", nickname)
+			}
+		}
+		close(quit)
+	}()
+
+	go func() {
+		interval := 5 * time.Second
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		p := message.NewPrinter(language.English)
+
+		for {
+			select {
+			case <-ticker.C:
+				accs := atomic.LoadUint32(&accounts)
+				vals := atomic.LoadUint32(&validators)
+				accDelta := uint32(accs - lastAccounts)
+				valDelta := uint32(vals - lastValidators)
+				// pretty print  the progress of the genesis state creation
+				s.log.Infof("[Genesis] Accounts: %s, Validators: %s | Elapsed: %s | Delta: %d | Tx/s: %.2f",
+					p.Sprintf("%d", accs),
+					p.Sprintf("%d", vals),
+					time.Since(start).String(),
+					accDelta+valDelta,
+					float64(accDelta+valDelta)/interval.Seconds(),
+				)
+				// update the last accounts/validators counts
+				lastAccounts = accs
+				lastValidators = vals
+			case <-quit:
+				return
+			}
+		}
+	}()
+}
+
 func (s *StateMachine) NewFromGenesisFile() (err lib.ErrorI) {
+	defer func() { close(s.genesisChan) }()
 	// get the genesis object from a file
 	genesis, err := s.ReadGenesisFromFile()
 	if err != nil {
 		return
 	}
+	go s.logGenesisProgress()
 	// set the state using the genesis object
 	if err = s.NewStateFromGenesis(genesis); err != nil {
 		return
@@ -37,16 +100,20 @@ func (s *StateMachine) ReadGenesisFromFile() (genesis *GenesisState, e lib.Error
 	// create a new genesis object to ensure no nil result
 	genesis = new(GenesisState)
 	// read the genesis file from the data directory + `genesis.json` path
+	now := time.Now()
 	bz, err := os.ReadFile(filepath.Join(s.Config.DataDirPath, lib.GenesisFilePath))
 	if err != nil {
 		return nil, ErrReadGenesisFile(err)
 	}
+	s.log.Debugf("Read genesis.json, took: %s", time.Since(now).String())
 	// populate the genesis object using the file bytes
+	now = time.Now()
 	if err = json.Unmarshal(bz, genesis); err != nil {
 		return nil, ErrUnmarshalGenesis(err)
 	}
 	// ensure the genesis object is valid
 	e = s.ValidateGenesisState(genesis)
+	s.log.Debugf("Marshalled/Validated genesis.json took: %s", time.Since(now).String())
 	// exit
 	return
 }
@@ -57,6 +124,7 @@ func (s *StateMachine) NewStateFromGenesis(genesis *GenesisState) (err lib.Error
 	// create a new supply tracker object reference
 	supply := new(Supply)
 	// set the accounts from the genesis object in state
+	s.log.Debugf("Adding %d accounts", len(genesis.Accounts))
 	if err = s.SetAccounts(genesis.Accounts, supply); err != nil {
 		return
 	}
@@ -65,6 +133,7 @@ func (s *StateMachine) NewStateFromGenesis(genesis *GenesisState) (err lib.Error
 		return
 	}
 	// set the validators from the genesis object in state
+	s.log.Debugf("Adding %d validators", len(genesis.Validators))
 	if err = s.SetValidators(genesis.Validators, supply); err != nil {
 		return
 	}

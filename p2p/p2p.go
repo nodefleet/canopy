@@ -303,7 +303,7 @@ func (p *P2P) AddPeer(conn net.Conn, info *lib.PeerInfo, disconnect, strictPubli
 func (p *P2P) DialWithBackoff(peerInfo *lib.PeerAddress, strictPublicKey bool) {
 	dialAndLog := func() (err error) {
 		if err = p.Dial(peerInfo, false, strictPublicKey); err != nil {
-			p.log.Errorf("Dial %s@%s failed: %s", lib.BytesToString(peerInfo.PublicKey), peerInfo.NetAddress, err.Error())
+			// p.log.Errorf("Dial %s@%s failed: %s", lib.BytesToString(peerInfo.PublicKey), peerInfo.NetAddress, err.Error())
 		}
 		return
 	}

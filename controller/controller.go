@@ -137,6 +137,7 @@ func (c *Controller) Stop() {
 	if err := c.FSM.Store().(lib.StoreI).Close(); err != nil {
 		c.log.Error(err.Error())
 	}
+	c.log.Info("Store closed")
 	// stop the p2p module
 	c.P2P.Stop()
 }
