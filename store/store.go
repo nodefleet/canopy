@@ -279,13 +279,16 @@ func (s *Store) Commit() (root []byte, err lib.ErrorI) {
 	if e := s.Write(); e != nil {
 		return nil, err
 	}
+	now := time.Now()
 	s.log.Infof("flushing batch writer to disk, version: %d size %d count %d", s.version, size, entries)
 	if e := s.writer.Flush(); e != nil {
 		return nil, ErrCommitDB(e)
 	}
+	s.log.Infof("flushed batch writer to disk, took: %s", time.Since(now).String())
 	// reset the writer for the next height
 	s.resetWriter()
 	// return the root
+	s.log.Info("resetting store")
 	return bytes.Clone(s.root), nil
 }
 
