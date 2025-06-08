@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
-	"github.com/canopy-network/canopy/lib/crypto"
 	"math"
 	"reflect"
 	"strings"
 	"unsafe"
+
+	"github.com/canopy-network/canopy/lib/crypto"
 
 	"github.com/canopy-network/canopy/lib"
 	"github.com/dgraph-io/badger/v4"
@@ -222,7 +223,7 @@ func (t *Txn) SetEntry(entry *badger.Entry) lib.ErrorI {
 func (t *Txn) update(key []byte, v []byte, opAction op) {
 	hashKey := crypto.Hash64(key)
 	if t.sort {
-		if _, found := t.cache.ops[hashKey]; !found {
+		if _, found := t.cache.ops[hashKey]; !found && t.sort {
 			t.addToSorted(string(key))
 		}
 	}
@@ -235,7 +236,7 @@ func (t *Txn) update(key []byte, v []byte, opAction op) {
 func (t *Txn) updateEntry(key []byte, v *badger.Entry) {
 	hashKey := crypto.Hash64(key)
 	if t.sort {
-		if _, found := t.cache.ops[hashKey]; !found {
+		if _, found := t.cache.ops[hashKey]; !found && t.sort {
 			t.addToSorted(string(key))
 		}
 	}
