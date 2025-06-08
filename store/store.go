@@ -189,7 +189,7 @@ func NewStoreWithDB(db *badger.DB, metrics *lib.Metrics, log lib.LoggerI, write 
 	// be set at the commit time
 	writer := db.NewWriteBatchAt(id.Height + 1)
 	// return the store object
-	return &Store{
+	st := &Store{
 		version:   id.Height,
 		log:       log,
 		db:        db,
@@ -202,7 +202,9 @@ func NewStoreWithDB(db *badger.DB, metrics *lib.Metrics, log lib.LoggerI, write 
 		metrics:   metrics,
 		root:      id.Root,
 		statsChan: make(chan StoreStat, 5000),
-	}, nil
+	}
+	st.logData() // start logging data
+	return st, nil
 }
 
 // NewReadOnly() returns a store without a writer - meant for historical read only queries

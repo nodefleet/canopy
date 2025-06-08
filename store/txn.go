@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
+	"github.com/canopy-network/canopy/lib/crypto"
 	"math"
 	"reflect"
 	"strings"
@@ -110,7 +111,7 @@ type cache struct {
 
 // txn internal structure maintains the write operations sorted lexicographically by keys
 type txn struct {
-	ops map[string]valueOp // [string(key)] -> set/del operations saved in memory
+	ops map[uint64]valueOp // [hash64(key)] -> set/del operations saved in memory
 	// sorted   []string           // ops keys sorted lexicographically; needed for iteration
 	sorted    *btree.BTreeG[*CacheItem] // sorted btree of keys for fast iteration
 	sortedLen int                       // len(sorted)
@@ -118,7 +119,7 @@ type txn struct {
 
 // txn() returns a copy of the current transaction cache
 func (t txn) copy() txn {
-	ops := make(map[string]valueOp, t.sortedLen)
+	ops := make(map[uint64]valueOp, t.sortedLen)
 	maps.Copy(ops, t.ops)
 	return txn{
 		ops:       ops,
@@ -139,6 +140,7 @@ const (
 
 // valueOp has the value portion of the operation and the corresponding operation to perform
 type valueOp struct {
+	key        []byte        // the key of the key value pair
 	value      []byte        // value of key value pair
 	valueEntry *badger.Entry // value of key value pair in case of a custom entry
 	op         op            // is operation delete
@@ -153,7 +155,7 @@ func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, 
 		logger: logger,
 		sort:   sort,
 		cache: txn{
-			ops: make(map[string]valueOp),
+			ops: make(map[uint64]valueOp),
 			sorted: btree.NewG(32, func(a, b *CacheItem) bool {
 				return a.Less(b)
 			}), // need to benchmark this value
@@ -170,7 +172,7 @@ func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, sort bool, logg
 		logger: logger,
 		sort:   sort,
 		cache: txn{
-			ops: make(map[string]valueOp),
+			ops: make(map[uint64]valueOp),
 			sorted: btree.NewG(32, func(a, b *CacheItem) bool {
 				return a.Less(b)
 			}), // need to benchmark this value
@@ -183,7 +185,7 @@ func (t *Txn) Get(key []byte) ([]byte, lib.ErrorI) {
 	// append the prefix to the key
 	prefixedKey := lib.Append(t.prefix, key)
 	// first retrieve from the in-memory cache
-	if v, found := t.cache.ops[lib.BytesToString(prefixedKey)]; found {
+	if v, found := t.cache.ops[crypto.Hash64(prefixedKey)]; found {
 		return v.value, nil
 	}
 	// if not found, retrieve from the parent reader
@@ -192,46 +194,52 @@ func (t *Txn) Get(key []byte) ([]byte, lib.ErrorI) {
 
 // Set() adds or updates the value for a key in the cache operations
 func (t *Txn) Set(key, value []byte) lib.ErrorI {
-	t.update(lib.BytesToString(lib.Append(t.prefix, key)), value, opSet)
+	t.update(lib.Append(t.prefix, key), value, opSet)
 	return nil
 }
 
 // Delete() marks a key for deletion in the cache operations
 func (t *Txn) Delete(key []byte) lib.ErrorI {
-	t.update(lib.BytesToString(lib.Append(t.prefix, key)), nil, opDelete)
+	t.update(lib.Append(t.prefix, key), nil, opDelete)
 	return nil
 }
 
 // Tombstone() removes the key-value pair from the BadgerDB transaction but prevents it from being garbage collected
-func (t *Txn) Tombstone(k []byte) lib.ErrorI {
-	t.update(lib.BytesToString(lib.Append(t.prefix, k)), nil, opTombstone)
+func (t *Txn) Tombstone(key []byte) lib.ErrorI {
+	t.update(lib.Append(t.prefix, key), nil, opTombstone)
 	return nil
 }
 
 // SetEntry() adds or updates a custom badger entry in the cache operations
 func (t *Txn) SetEntry(entry *badger.Entry) lib.ErrorI {
-	t.updateEntry(lib.BytesToString(lib.Append(t.prefix, entry.Key)), entry)
+	t.updateEntry(lib.Append(t.prefix, entry.Key), entry)
 	return nil
 }
 
 // update() modifies or adds an operation for a key in the cache operations and maintains the
 // lexicographical order.
 // NOTE: update() won't modify the key itself, any key prefixing must be done before calling this
-func (t *Txn) update(key string, v []byte, opAction op) {
-	if _, found := t.cache.ops[key]; !found && t.sort {
-		t.addToSorted(key)
+func (t *Txn) update(key []byte, v []byte, opAction op) {
+	hashKey := crypto.Hash64(key)
+	if t.sort {
+		if _, found := t.cache.ops[hashKey]; !found {
+			t.addToSorted(string(key))
+		}
 	}
-	t.cache.ops[key] = valueOp{value: v, op: opAction}
+	t.cache.ops[hashKey] = valueOp{key: key, value: v, op: opAction}
 }
 
 // updateEntry() modifies or adds a custom badger entry in the cache operations and maintains the
 // lexicographical order.
 // NOTE: updateEntry() won't modify the key itself, any key prefixing must be done before calling this
-func (t *Txn) updateEntry(key string, v *badger.Entry) {
-	if _, found := t.cache.ops[key]; !found && t.sort {
-		t.addToSorted(key)
+func (t *Txn) updateEntry(key []byte, v *badger.Entry) {
+	hashKey := crypto.Hash64(key)
+	if t.sort {
+		if _, found := t.cache.ops[hashKey]; !found {
+			t.addToSorted(string(key))
+		}
 	}
-	t.cache.ops[key] = valueOp{valueEntry: v, op: opEntry}
+	t.cache.ops[hashKey] = valueOp{key: key, valueEntry: v, op: opEntry}
 }
 
 // addToSorted() inserts a key into the sorted list of operations maintaining lexicographical order
@@ -260,7 +268,7 @@ func (t *Txn) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
 // Discard() clears all in-memory operations and resets the sorted key list
 func (t *Txn) Discard() {
 	t.cache.sorted.Clear(false)
-	t.cache.ops, t.cache.sortedLen = make(map[string]valueOp), 0
+	t.cache.ops, t.cache.sortedLen = make(map[uint64]valueOp), 0
 }
 
 // Cancel() cancels the current transaction. Any new writes won't be committed
@@ -270,11 +278,8 @@ func (t *Txn) Cancel() {
 
 // Write() flushes the in-memory operations to the batch writer and clears in-memory changes
 func (t *Txn) Write() lib.ErrorI {
-	for k, v := range t.cache.ops {
-		sk, er := lib.StringToBytes(k)
-		if er != nil {
-			return er
-		}
+	for _, v := range t.cache.ops {
+		sk := v.key
 		switch v.op {
 		case opSet:
 			if err := t.writer.Set(sk, v.value); err != nil {
@@ -341,7 +346,7 @@ type TxnIterator struct {
 func newTxnIterator(parent lib.IteratorI, t txn, parentPrefix, prefix []byte, reverse bool) *TxnIterator {
 	tree := NewBTreeIterator(t.sorted.Clone(),
 		&CacheItem{
-			Key: lib.BytesToString(parentPrefix) + lib.BytesToString(prefix),
+			Key: string(lib.Append(parentPrefix, prefix)),
 		},
 		reverse)
 
@@ -349,8 +354,8 @@ func newTxnIterator(parent lib.IteratorI, t txn, parentPrefix, prefix []byte, re
 		parent:       parent,
 		tree:         tree,
 		txn:          t,
-		parentPrefix: lib.BytesToString(parentPrefix),
-		prefix:       lib.BytesToString(prefix),
+		parentPrefix: string(parentPrefix),
+		prefix:       string(prefix),
 		reverse:      reverse,
 		// hasNext:      tree.HasNext(),
 	}).First()
@@ -476,12 +481,13 @@ func (ti *TxnIterator) txnInvalid() bool {
 
 // txnKey() returns the key of the current in-memory operation
 func (ti *TxnIterator) txnKey() []byte {
-	bz, _ := lib.StringToBytes(strings.TrimPrefix(ti.tree.Current().Key, ti.parentPrefix))
-	return bz
+	return []byte(strings.TrimPrefix(ti.tree.Current().Key, ti.parentPrefix))
 }
 
 // txnValue() returns the value of the current in-memory operation
-func (ti *TxnIterator) txnValue() valueOp { return ti.ops[ti.tree.Current().Key] }
+func (ti *TxnIterator) txnValue() valueOp {
+	return ti.ops[crypto.Hash64([]byte(ti.tree.Current().Key))]
+}
 
 // compare() compares two byte slices, adjusting for reverse iteration if needed
 func (ti *TxnIterator) compare(a, b []byte) int {
@@ -507,8 +513,8 @@ func (ti *TxnIterator) seek() *TxnIterator {
 
 // revSeek() positions the iterator at the last entry that matches the prefix in reverse order.
 func (ti *TxnIterator) revSeek() *TxnIterator {
-	bz, _ := lib.StringToBytes(ti.parentPrefix + ti.prefix)
-	endPrefix := lib.BytesToString(prefixEnd(bz))
+	bz := []byte(ti.parentPrefix + ti.prefix)
+	endPrefix := string(prefixEnd(bz))
 	ti.tree.Move(&CacheItem{
 		Key: endPrefix,
 	})
