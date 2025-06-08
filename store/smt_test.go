@@ -3,11 +3,11 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"github.com/canopy-network/canopy/lib/crypto"
 	"strconv"
 	"testing"
 
 	"github.com/canopy-network/canopy/lib"
-	"github.com/canopy-network/canopy/lib/crypto"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/stretchr/testify/require"
 )
@@ -26,15 +26,15 @@ func TestSet(t *testing.T) {
 		{
 			name: "insert and target at 1110",
 			detail: `BEFORE    root
-                               /   \
-						    0000  1111
+	                             /   \
+							    0000  1111
 
-			          AFTER     root
-		                        /  \
-						    0000   111
-                                   /  \
-							   *1110*  1111
-                              `,
+				          AFTER     root
+			                        /  \
+							    0000   111
+	                                 /  \
+								   *1110*  1111
+	                            `,
 			keyBitSize:  4,
 			rootKey:     []byte{0b10010000}, // arbitrary
 			targetKey:   []byte{5},          // hashes to [1110]
@@ -71,19 +71,19 @@ func TestSet(t *testing.T) {
 		{
 			name: "insert and target at 011",
 			detail: `BEFORE    root
-		                           / \
-		                          0   1
-							     / \
-						       010 001
+			                           / \
+			                          0   1
+								     / \
+							       010 001
 
-			          AFTER    root
-		                        / \
-		                       0   1
-							  / \
-						     01  001
-						    / \
-						  010 *011*
-		                          `,
+				          AFTER    root
+			                        / \
+			                       0   1
+								  / \
+							     01  001
+							    / \
+							  010 *011*
+			                          `,
 			keyBitSize:  3,
 			rootKey:     []byte{0b10010000}, // arbitrary
 			targetKey:   []byte{6},          // hashes to [011]
@@ -127,21 +127,21 @@ func TestSet(t *testing.T) {
 		{
 			name: "update and target at 101",
 			detail: `BEFORE    root
-		                           / \
-		                          0   1
-		                              / \
-		                             10  11
-		                            / \
-		                           100 101
+			                           / \
+			                          0   1
+			                              / \
+			                             10  11
+			                            / \
+			                           100 101
 
-			          AFTER    root
-		                        / \
-		                       0   1
-		                          / \
-		                         10  11
-		                         / \
-		                      100 *101*
-		                          `,
+				          AFTER    root
+			                        / \
+			                       0   1
+			                          / \
+			                         10  11
+			                         / \
+			                      100 *101*
+			                          `,
 			keyBitSize:  3,
 			rootKey:     []byte{0b10010000}, // arbitrary
 			targetKey:   []byte{8},          // hashes to [101]
@@ -187,17 +187,17 @@ func TestSet(t *testing.T) {
 		{
 			name: "update and target at 010",
 			detail: `BEFORE:   root
-							  /    \
-						     0      1
-		                   /  \    /  \
-		                000  010 101  111
+								  /    \
+							     0      1
+			                   /  \    /  \
+			                000  010 101  111
 
-					AFTER:      root
-							  /      \
-						     0        1
-		                   /  \      /  \
-		                000 *010*  101   111
-							`,
+						AFTER:      root
+								  /      \
+							     0        1
+			                   /  \      /  \
+			                000 *010*  101   111
+								`,
 			keyBitSize:  3,
 			rootKey:     []byte{0b10010000}, // arbitrary
 			targetKey:   []byte{1},          // hashes to [010]
@@ -244,23 +244,23 @@ func TestSet(t *testing.T) {
 		{
 			name: "insert and target at 000010000",
 			detail: `BEFORE:   root
-							  /    \
-						    0000    1
-								  /   \
-								1000   111
+								  /    \
+							    0000    1
 									  /   \
-								    1110  1111
+									1000   111
+										  /   \
+									    1110  1111
 
-					AFTER:     root
-							  /    \
-						    0000    1
-								  /   \
-								1000 *11*
-		                             /  \
-							      *1101* 111
-									    /   \
-								      1110  1111
-							`,
+						AFTER:     root
+								  /    \
+							    0000    1
+									  /   \
+									1000 *11*
+			                             /  \
+								      *1101* 111
+										    /   \
+									      1110  1111
+								`,
 			keyBitSize:  4,
 			rootKey:     []byte{0b10010000},
 			targetKey:   []byte{2}, // hashes to [1 1 0 1]
@@ -310,21 +310,21 @@ func TestSet(t *testing.T) {
 		{
 			name: "insert and target at 0 1 1 0",
 			detail: `BEFORE:   root
-							  /    \
-						    0000    1
-								  /   \
-								1000   111
+								  /    \
+							    0000    1
 									  /   \
-								    1110  1111
+									1000   111
+										  /   \
+									    1110  1111
 
-					AFTER:         root
-							      /     \
-		                      *01*       1
-		                       / \      /  \
-		                   0000 *0110* 1000  111
-									   /  \
-								     1110   1111
-							`,
+						AFTER:         root
+								      /     \
+			                      *01*       1
+			                       / \      /  \
+			                   0000 *0110* 1000  111
+										   /  \
+									     1110   1111
+								`,
 			keyBitSize:  4,
 			rootKey:     []byte{0b10010000},
 			targetKey:   []byte{6}, // hashes to [0 1 1 0]
@@ -365,19 +365,19 @@ func TestSet(t *testing.T) {
 		{
 			name: "insert and target at 000010000",
 			detail: `BEFORE:   root
-							  /    \
-						    00     111111111
-						   /  \
-				   000000000  001111111
+								  /    \
+							    00     111111111
+							   /  \
+					   000000000  001111111
 
-					AFTER:     root
-							  /    \
-						    00     111111111
-		                        /  \
-					   *0000*   001111111
-					   /   \
-				  000000000 *000010000*
-							`,
+						AFTER:     root
+								  /    \
+							    00     111111111
+			                        /  \
+						   *0000*   001111111
+						   /   \
+					  000000000 *000010000*
+								`,
 			keyBitSize:  9,
 			rootKey:     []byte{0b10010000, 0}, // arbitrary
 			targetKey:   []byte{3},             // hashes to [00001000,0]
@@ -385,29 +385,34 @@ func TestSet(t *testing.T) {
 			preset: &NodeList{
 				Nodes: []*node{
 					{ // root
-						Key: &key{mostSigBytes: []byte{0b10010000}, leastSigBits: []int{0}}, // arbitrary
+						Key: &key{key: []byte{0b10010000, 0, 0}},
+						//Key: &key{mostSigBytes: []byte{0b10010000}, leastSigBits: []int{0}}, // arbitrary
 						Node: lib.Node{
 							LeftChildKey:  []byte{0b0, 1},             // 00
 							RightChildKey: []byte{0b11111111, 0b1, 0}, // 111111111
 						},
 					},
 					{ // 00
-						Key: &key{leastSigBits: []int{0, 0}},
+						Key: &key{key: []byte{0, 1}},
+						//Key: &key{leastSigBits: []int{0, 0}},
 						Node: lib.Node{
 							LeftChildKey:  []byte{0b00000000, 0b0, 0}, // 000000000
 							RightChildKey: []byte{0b00111111, 0b1, 0}, // 001111111
 						},
 					},
 					{ // 000000000
-						Key:  &key{mostSigBytes: []byte{0b00000000}, leastSigBits: []int{0}},
+						Key: &key{key: []byte{0b00000000, 0, 0}},
+						//Key:  &key{mostSigBytes: []byte{0b00000000}, leastSigBits: []int{0}},
 						Node: lib.Node{}, // leaf
 					},
 					{ // 001111111
-						Key:  &key{mostSigBytes: []byte{0b00111111}, leastSigBits: []int{1}},
+						Key: &key{key: []byte{0b00111111, 1, 0}},
+						//Key:  &key{mostSigBytes: []byte{0b00111111}, leastSigBits: []int{1}},
 						Node: lib.Node{}, // leaf
 					},
 					{ // 111111111
-						Key:  &key{mostSigBytes: []byte{0b11111111}, leastSigBits: []int{1}},
+						Key: &key{key: []byte{0b11111111, 1, 0}},
+						//Key:  &key{mostSigBytes: []byte{0b11111111}, leastSigBits: []int{1}},
 						Node: lib.Node{}, // leaf
 					},
 				},
@@ -415,33 +420,39 @@ func TestSet(t *testing.T) {
 			expected: &NodeList{
 				Nodes: []*node{
 					{ // 000000000
-						Key:  &key{mostSigBytes: []byte{0b00000000}, leastSigBits: []int{0}},
+						Key: &key{key: []byte{0b00000000, 0, 0}},
+						//Key:  &key{mostSigBytes: []byte{0b00000000}, leastSigBits: []int{0}},
 						Node: lib.Node{}, // leaf
 					},
 					{ // 00
-						Key: &key{leastSigBits: []int{0, 0}},
+						Key: &key{key: []byte{0b0, 1}},
+						//Key: &key{leastSigBits: []int{0, 0}},
 						Node: lib.Node{
 							LeftChildKey:  []byte{0b0, 3},             // 0000
 							RightChildKey: []byte{0b00111111, 0b1, 0}, // 001111111
 						},
 					},
 					{ // 0000
-						Key: &key{leastSigBits: []int{0, 0, 0, 0}},
+						Key: &key{key: []byte{0b0, 3}},
+						//Key: &key{leastSigBits: []int{0, 0, 0, 0}},
 						Node: lib.Node{
 							LeftChildKey:  []byte{0b00000000, 0b0, 0}, // 000000000
 							RightChildKey: []byte{0b00001000, 0b0, 0}, // 000010000
 						},
 					},
 					{ // 000010000
-						Key:  &key{mostSigBytes: []byte{0b00001000}, leastSigBits: []int{0}},
+						Key: &key{key: []byte{0b00001000, 0, 0}},
+						//Key:  &key{mostSigBytes: []byte{0b00001000}, leastSigBits: []int{0}},
 						Node: lib.Node{Value: []byte("some_value")}, // leaf
 					},
 					{ // 001111111
-						Key:  &key{mostSigBytes: []byte{0b00111111}, leastSigBits: []int{1}},
+						Key: &key{key: []byte{0b00111111, 1, 0}},
+						//Key:  &key{mostSigBytes: []byte{0b00111111}, leastSigBits: []int{1}},
 						Node: lib.Node{}, // leaf
 					},
 					{ // root
-						Key: &key{mostSigBytes: []byte{0b10010000}, leastSigBits: []int{0}}, // arbitrary
+						Key: &key{key: []byte{0b10010000, 0, 0}},
+						//Key: &key{mostSigBytes: []byte{0b10010000}, leastSigBits: []int{0}}, // arbitrary
 						Node: lib.Node{
 							Value: func() []byte {
 								// great-grandchildren
@@ -458,7 +469,8 @@ func TestSet(t *testing.T) {
 						},
 					},
 					{ // 111111111
-						Key:  &key{mostSigBytes: []byte{0b11111111}, leastSigBits: []int{1}},
+						Key: &key{key: []byte{0b11111111, 1, 0}},
+						//Key:  &key{mostSigBytes: []byte{0b11111111}, leastSigBits: []int{1}},
 						Node: lib.Node{}, // leaf
 					},
 				},
@@ -488,8 +500,8 @@ func TestSet(t *testing.T) {
 					// compare got vs expected
 					//fmt.Printf("%08b %v\n", got.Key.mostSigBytes, got.Key.leastSigBits)
 					require.Equal(t, test.expected.Nodes[i].Key.bytes(), got.Key.bytes(), fmt.Sprintf("Key Iteration: %d on node %v", i, got.Key.bytes()))
-					require.Equal(t, test.expected.Nodes[i].LeftChildKey, got.LeftChildKey, fmt.Sprintf("Left Child Key Iteration: %d on node %v", i, got.Key.leastSigBits))
-					require.Equal(t, test.expected.Nodes[i].RightChildKey, got.RightChildKey, fmt.Sprintf("Right Child Key Iteration: %d on node %v", i, got.Key.leastSigBits))
+					require.Equal(t, test.expected.Nodes[i].LeftChildKey, got.LeftChildKey, fmt.Sprintf("Left Child Key Iteration: %d on node %v", i, got.Key.key))
+					require.Equal(t, test.expected.Nodes[i].RightChildKey, got.RightChildKey, fmt.Sprintf("Right Child Key Iteration: %d on node %v", i, got.Key.key))
 					// check root value (this allows quick verification of the hashing up logic without actually needing to fill in and check every value)
 					if bytes.Equal(got.Key.bytes(), smt.root.Key.bytes()) {
 						require.Equal(t, test.expected.Nodes[i].Value, got.Value)
@@ -499,7 +511,6 @@ func TestSet(t *testing.T) {
 		})
 	}
 }
-
 func TestDelete(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -513,15 +524,15 @@ func TestDelete(t *testing.T) {
 		{
 			name: "delete with target at 110",
 			detail: `BEFORE:   root
-							  /    \
-						 	000    11
-		                          /  \
-		                        110  111
+								  /    \
+							 	000    11
+			                          /  \
+			                        110  111
 
-					AFTER:      root
-							   /    \
-                             000    111
-							`,
+						AFTER:      root
+								   /    \
+	                           000    111
+								`,
 			keyBitSize: 3,
 			rootKey:    []byte{0b10010000}, // arbitrary
 			targetKey:  []byte{2},          // hashes to [110]
@@ -552,17 +563,17 @@ func TestDelete(t *testing.T) {
 		{
 			name: "delete with target at 010",
 			detail: `BEFORE:   root
-							  /    \
-						     0      1
-		                   /  \    /  \
-		                000 *010* 101  111
+								  /    \
+							     0      1
+			                   /  \    /  \
+			                000 *010* 101  111
 
-					AFTER:      root
-							  /      \
-                            000        1
-		                              /  \
-		                           101   111
-							`,
+						AFTER:      root
+								  /      \
+	                          000        1
+			                              /  \
+			                           101   111
+								`,
 			keyBitSize: 3,
 			rootKey:    []byte{0b10010000}, // arbitrary
 			targetKey:  []byte{1},          // hashes to [010]
@@ -598,19 +609,19 @@ func TestDelete(t *testing.T) {
 		{
 			name: "Delete and target at 1 1 1 0",
 			detail: `BEFORE:   root
-								  /    \
-							    0000    1
-									  /   \
-								    1011   111
+									  /    \
+								    0000    1
 										  /   \
-									   *1110* 1111
+									    1011   111
+											  /   \
+										   *1110* 1111
 
-						AFTER:     root
-								  /     \
-			                      0000       1
-			                                /  \
-			                             1011  1111
-								`,
+							AFTER:     root
+									  /     \
+				                      0000       1
+				                                /  \
+				                             1011  1111
+									`,
 			keyBitSize: 4,
 			rootKey:    []byte{0b10010000},
 			targetKey:  []byte{4}, // hashes to [1 1 1 0]
@@ -649,19 +660,19 @@ func TestDelete(t *testing.T) {
 		{
 			name: "Delete and target at 1 0 1 1",
 			detail: `BEFORE:   root
-							  /    \
-						    0000    1
-								  /   \
-							  *1011*   111
+								  /    \
+							    0000    1
 									  /   \
-								    1110  1111
+								  *1011*   111
+										  /   \
+									    1110  1111
 
-					AFTER:     root
-							  /     \
-                          0000      111
-                                    /  \
-                                 1110   1111
-							`,
+						AFTER:     root
+								  /     \
+	                        0000      111
+	                                  /  \
+	                               1110   1111
+								`,
 			keyBitSize: 4,
 			rootKey:    []byte{0b10010000},
 			targetKey:  []byte{8}, // hashes to [1 0 1 1]
@@ -696,17 +707,17 @@ func TestDelete(t *testing.T) {
 		{
 			name: "delete (not exists) and target at 011",
 			detail: `BEFORE:   root     *011* <- target not exists
-							  /     \
-						    0        10
-						  /   \     /  \
-					    001   010  100  101
+								  /     \
+							    0        10
+							  /   \     /  \
+						    001   010  100  101
 
-					After:     root
-							  /     \
-						    0        10
-						  /   \     /  \
-					    001   010  100  101
-							`,
+						After:     root
+								  /     \
+							    0        10
+							  /   \     /  \
+						    001   010  100  101
+								`,
 			keyBitSize: 3,
 			rootKey:    []byte{0b10010000},
 			targetKey:  []byte{6}, // hashes to [011]
@@ -736,21 +747,21 @@ func TestDelete(t *testing.T) {
 		{
 			name: "delete (not exists) and target at 1101",
 			detail: `BEFORE:   root     *1101* <- target not exists
-							  /    \
-						    0000    1
-                         		  /   \
-								1000   111
-									  /   \
-								    1110  1111
+								  /    \
+							    0000    1
+	                       		  /   \
+									1000   111
+										  /   \
+									    1110  1111
 
-					After:   root
-							  /    \
-						    0000    1
-								  /   \
-								1000   111
+						After:   root
+								  /    \
+							    0000    1
 									  /   \
-								    1110  1111
-							`,
+									1000   111
+										  /   \
+									    1110  1111
+								`,
 			keyBitSize: 4,
 			rootKey:    []byte{0b10010000},
 			targetKey:  []byte{2}, // hashes to [1 1 0 1]
@@ -800,9 +811,9 @@ func TestDelete(t *testing.T) {
 					got.Key.fromBytes(it.Key())
 					// compare got vs expected
 					//fmt.Printf("%08b %v\n", got.Key.mostSigBytes, got.Key.leastSigBits)
-					require.Equal(t, test.expected.Nodes[i].Key.bytes(), got.Key.bytes(), fmt.Sprintf("Iteration: %d on node %v", i, got.Key.leastSigBits))
-					require.Equal(t, test.expected.Nodes[i].LeftChildKey, got.LeftChildKey, fmt.Sprintf("Iteration: %d on node %v", i, got.Key.leastSigBits))
-					require.Equal(t, test.expected.Nodes[i].RightChildKey, got.RightChildKey, fmt.Sprintf("Iteration: %d on node %v", i, got.Key.leastSigBits))
+					require.Equal(t, test.expected.Nodes[i].Key.bytes(), got.Key.bytes(), fmt.Sprintf("Iteration: %d on node %v", i, got.Key.key))
+					require.Equal(t, test.expected.Nodes[i].LeftChildKey, got.LeftChildKey, fmt.Sprintf("Iteration: %d on node %v", i, got.Key.key))
+					require.Equal(t, test.expected.Nodes[i].RightChildKey, got.RightChildKey, fmt.Sprintf("Iteration: %d on node %v", i, got.Key.key))
 					// check root value (this allows quick verification of the hashing up logic without actually needing to fill in and check every value)
 					if bytes.Equal(got.Key.bytes(), smt.root.Key.bytes()) {
 						require.Equal(t, test.expected.Nodes[i].Value, got.Value)
@@ -827,7 +838,7 @@ func TestTraverse(t *testing.T) {
 		{
 			name: "basic traversal, no preset (Left - 3bit)",
 			detail: `there's no preset - so traversed should only have root and the current should be the min hash
-                               root
+                             root
 							  /    \
 							*000*   111`,
 			keyBitSize: 3,
@@ -848,7 +859,7 @@ func TestTraverse(t *testing.T) {
 		{
 			name: "basic traversal, no preset (Right - 3bit)",
 			detail: `there's no preset - so traversed should only have root and the current should be the max hash
-                               root
+                             root
 							  /    \
 							000   *111*`,
 			keyBitSize: 3,
@@ -868,7 +879,7 @@ func TestTraverse(t *testing.T) {
 		{
 			name: "basic traversal, no preset (Left - 4bit)",
 			detail: `there's no preset - so traversed should only have root and the current should be the min hash
-                               root
+                             root
 							  /    \
 						   *0000*   1111`,
 			keyBitSize: 4,
@@ -889,7 +900,7 @@ func TestTraverse(t *testing.T) {
 		{
 			name: "basic traversal, no preset (Right - 5bit)",
 			detail: `there's no preset - so traversed should only have root and the current should be the max hash
-                               root
+                             root
 							  /    \
 							00000  *11111*`,
 			keyBitSize: 5,
@@ -951,7 +962,7 @@ func TestTraverse(t *testing.T) {
 								    1110 1111
 							`,
 			keyBitSize: 4,
-			target:     &node{Key: &key{leastSigBits: []int{1, 1, 0, 0}}},
+			target:     &node{Key: &key{key: []byte{0b1100, 0}}},
 			preset: &NodeList{
 				Nodes: []*node{
 					newTestNode("1001", nil, "0000", "1"), // root
@@ -983,7 +994,7 @@ func TestTraverse(t *testing.T) {
 								    1110 1111
 							`,
 			keyBitSize: 4,
-			target:     &node{Key: &key{leastSigBits: []int{0, 0, 0, 1}}},
+			target:     &node{Key: &key{key: []byte{0b1, 3}}},
 			preset: &NodeList{
 				Nodes: []*node{
 					newTestNode("1001", nil, "0000", "1"),             // root
@@ -1098,15 +1109,17 @@ func TestNewSMT(t *testing.T) {
 				Nodes: []*node{
 					{
 						Key: &key{
-							mostSigBytes: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-							leastSigBits: []int{0, 0, 0, 0, 0, 0, 0, 0},
+							key: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b0, 7},
+							//mostSigBytes: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+							//leastSigBits: []int{0, 0, 0, 0, 0, 0, 0, 0},
 						},
 						Node: lib.Node{Value: bytes.Repeat([]byte{0}, 20)},
 					},
 					{
 						Key: &key{
-							mostSigBytes: []byte{127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-							leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+							key: []byte{127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0b11111111, 0},
+							//mostSigBytes: []byte{127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+							//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
 						},
 						Node: lib.Node{
 							Value: func() []byte {
@@ -1123,8 +1136,9 @@ func TestNewSMT(t *testing.T) {
 					},
 					{
 						Key: &key{
-							mostSigBytes: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-							leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+							key: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0b11111111, 0},
+							//mostSigBytes: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+							//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
 						},
 						Node: lib.Node{Value: bytes.Repeat([]byte{255}, 20)},
 					},
@@ -1138,15 +1152,17 @@ func TestNewSMT(t *testing.T) {
 				Nodes: []*node{
 					{
 						Key: &key{
-							mostSigBytes: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-							leastSigBits: []int{0, 0, 0, 0, 0, 0, 0, 0},
+							key: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0b0, 7},
+							//mostSigBytes: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							//leastSigBits: []int{0, 0, 0, 0, 0, 0, 0, 0},
 						},
 						Node: lib.Node{Value: bytes.Repeat([]byte{0}, 20)},
 					},
 					{
 						Key: &key{
-							mostSigBytes: []byte{127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-							leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+							key: []byte{127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0b11111111, 0},
+							//mostSigBytes: []byte{127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+							//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
 						},
 						Node: lib.Node{
 							Value: func() []byte {
@@ -1163,8 +1179,9 @@ func TestNewSMT(t *testing.T) {
 					},
 					{
 						Key: &key{
-							mostSigBytes: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-							leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+							key: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0b11111111, 0},
+							//mostSigBytes: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+							//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
 						},
 						Node: lib.Node{Value: bytes.Repeat([]byte{255}, 20)},
 					},
@@ -1174,15 +1191,17 @@ func TestNewSMT(t *testing.T) {
 				Nodes: []*node{
 					{
 						Key: &key{
-							mostSigBytes: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
-							leastSigBits: []int{0, 0, 0, 0, 0, 0, 0, 0},
+							key: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0b0, 7},
+							//mostSigBytes: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+							//leastSigBits: []int{0, 0, 0, 0, 0, 0, 0, 0},
 						},
 						Node: lib.Node{Value: bytes.Repeat([]byte{0}, 20)},
 					},
 					{
 						Key: &key{
-							mostSigBytes: []byte{127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-							leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+							key: []byte{127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0b11111111, 0},
+							//mostSigBytes: []byte{127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+							//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
 						},
 						Node: lib.Node{
 							Value: func() []byte {
@@ -1199,8 +1218,9 @@ func TestNewSMT(t *testing.T) {
 					},
 					{
 						Key: &key{
-							mostSigBytes: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
-							leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+							key: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0b11111111, 0},
+							//mostSigBytes: []byte{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},
+							//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
 						},
 						Node: lib.Node{Value: bytes.Repeat([]byte{255}, 20)},
 					},
@@ -1257,180 +1277,192 @@ func TestKeyGreatestCommonPrefix(t *testing.T) {
 		{
 			name: "0000 partial",
 			target: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 0, 0},
+				key: []byte{0, 3},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 0, 0},
 			},
 			current: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0},
+				key: []byte{0, 0},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0},
 			},
-			gcp: &key{
-				mostSigBytes: nil,
-				leastSigBits: nil,
-			},
+			gcp:    &key{},
 			bitPos: 0,
 			expectedGCP: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0},
+				key: []byte{0, 0},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0},
 			},
 			expectedBitPos: 1,
 		},
 		{
 			name: "00000001 0111 full",
 			target: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 1, 1, 1},
+				key: []byte{byte(1), 0b111, 1},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 1, 1, 1},
 			},
 			current: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 1, 1, 1},
+				key: []byte{byte(1), 0b111, 1},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 1, 1, 1},
 			},
-			gcp: &key{
-				mostSigBytes: nil,
-				leastSigBits: nil,
-			},
+			gcp:    &key{},
 			bitPos: 0,
 			expectedGCP: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 1, 1, 1},
+				key: []byte{byte(1), 0b111, 1},
 			},
 			expectedBitPos: 12,
 		},
 		{
 			name: "11111111 000 full",
 			target: &key{
-				mostSigBytes: []byte{255},
-				leastSigBits: []int{0, 0, 0},
+				key: []byte{255, 0, 2},
+				//mostSigBytes: []byte{255},
+				//leastSigBits: []int{0, 0, 0},
 			},
 			current: &key{
-				mostSigBytes: []byte{255},
-				leastSigBits: []int{0, 0, 0},
+				key: []byte{255, 0, 2},
+				//mostSigBytes: []byte{255},
+				//leastSigBits: []int{0, 0, 0},
 			},
-			gcp: &key{
-				mostSigBytes: nil,
-				leastSigBits: nil,
-			},
+			gcp:    &key{},
 			bitPos: 0,
 			expectedGCP: &key{
-				mostSigBytes: []byte{255},
-				leastSigBits: []int{0, 0, 0},
+				key: []byte{255, 0, 2},
+				//mostSigBytes: []byte{255},
+				//leastSigBits: []int{0, 0, 0},
 			},
 			expectedBitPos: 11,
 		},
 		{
 			name: "00000001 0111 partial",
 			target: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 1, 1, 1},
+				key: []byte{1, 0b111, 1},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 1, 1, 1},
 			},
 			current: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 1},
+				key: []byte{1, 0b1, 1},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 1},
 			},
-			gcp: &key{
-				mostSigBytes: nil,
-				leastSigBits: nil,
-			},
+			gcp:    &key{},
 			bitPos: 0,
 			expectedGCP: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 1},
+				key: []byte{1, 0b1, 1},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 1},
 			},
 			expectedBitPos: 10,
 		},
 		{
 			name: "11111111 000 partial",
 			target: &key{
-				mostSigBytes: []byte{255},
-				leastSigBits: []int{0, 0, 0},
+				key: []byte{255, 0, 2},
+				//mostSigBytes: []byte{255},
+				//leastSigBits: []int{0, 0, 0},
 			},
 			current: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+				key: []byte{255, 0},
+				//mostSigBytes: []byte{},
+				//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
 			},
-			gcp: &key{
-				mostSigBytes: nil,
-				leastSigBits: nil,
-			},
+			gcp:    &key{},
 			bitPos: 0,
 			expectedGCP: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+				key: []byte{255, 0},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
 			},
 			expectedBitPos: 8,
 		},
 		{
 			name: "000011 continue",
 			target: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 0, 0, 1, 1},
+				key: []byte{0b11, 4},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 0, 0, 1, 1},
 			},
 			current: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 0, 0, 1},
+				key: []byte{0b1, 4},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 0, 0, 1},
 			},
 			gcp: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 0},
+				key: []byte{0b0, 2},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 0},
 			},
 			bitPos: 3,
 			expectedGCP: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 0, 0, 1},
+				key: []byte{0b1, 4},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 0, 0, 1},
 			},
 			expectedBitPos: 5,
 		},
 		{
 			name: "00000001 000011 continue",
 			target: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 0, 0, 0, 1, 1},
+				key: []byte{0b1, 0b11, 4},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 0, 0, 0, 1, 1},
 			},
 			current: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 0, 0, 0, 1},
+				key: []byte{0b1, 0b1, 4},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 0, 0, 0, 1},
 			},
 			gcp: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 0},
+				key: []byte{0b0, 2},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 0},
 			},
 			bitPos: 3,
 			expectedGCP: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 0, 0, 0, 1},
+				key: []byte{0b1, 0b1, 4},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 0, 0, 0, 1},
 			},
 			expectedBitPos: 13,
 		},
 		{
 			name: "00000001 000011 continue not exact",
 			target: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 0, 0, 0, 1, 1},
+				key: []byte{0b1, 0b11, 4},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 0, 0, 0, 1, 1},
 			},
 			current: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 0, 0, 0, 1, 0},
+				key: []byte{0b1, 0b10, 4},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 0, 0, 0, 1, 0},
 			},
 			gcp: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 0},
+				key: []byte{0b0, 2},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 0},
 			},
 			bitPos: 3,
 			expectedGCP: &key{
-				mostSigBytes: []byte{1},
-				leastSigBits: []int{0, 0, 0, 0, 1},
+				key: []byte{0b1, 0b1, 4},
+				//mostSigBytes: []byte{1},
+				//leastSigBits: []int{0, 0, 0, 0, 1},
 			},
 			expectedBitPos: 13,
 		},
 		{
 			name: "0 001 panic current greater than target",
 			target: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0},
+				key: []byte{0, 0},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0},
 			},
 			current: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 1},
+				key: []byte{1, 2},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 1},
 			},
 			bitPos:         1,
 			shouldPanic:    true,
@@ -1445,8 +1477,9 @@ func TestKeyGreatestCommonPrefix(t *testing.T) {
 		{
 			name: "0000 nil panic nil current",
 			target: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 0, 0},
+				key: []byte{0, 3},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 0, 0},
 			},
 			current:     nil,
 			shouldPanic: true,
@@ -1454,8 +1487,9 @@ func TestKeyGreatestCommonPrefix(t *testing.T) {
 		{
 			name: "nil 0000 panic nil target",
 			current: &key{
-				mostSigBytes: nil,
-				leastSigBits: []int{0, 0, 0, 0},
+				key: []byte{0, 3},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{0, 0, 0, 0},
 			},
 			target:      nil,
 			shouldPanic: true,
@@ -1469,335 +1503,18 @@ func TestKeyGreatestCommonPrefix(t *testing.T) {
 					require.Equal(t, r != nil, test.shouldPanic)
 				}
 			}()
-
+			for i := 0; i < test.expectedGCP.totalBits(); i++ {
+				if i%8 == 0 && i != 0 {
+					fmt.Print("_")
+				}
+				fmt.Printf("%d", test.expectedGCP.bitAt(i))
+			}
+			fmt.Println("_")
 			// Compare the greatest common prefix between the target and the current key
 			test.target.greatestCommonPrefix(&test.bitPos, test.gcp, test.current)
 			// Compare the results
-			require.Equal(t, test.expectedGCP, test.gcp)
+			require.Equal(t, test.expectedGCP.bytes(), test.gcp.bytes())
 			require.Equal(t, test.expectedBitPos, test.bitPos)
-		})
-	}
-}
-
-func TestKeyDecode(t *testing.T) {
-	tests := []struct {
-		name        string
-		data        []byte
-		expectedKey *key
-	}{
-		{
-			name: "0",
-			data: []byte{0, 0},
-			expectedKey: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0},
-			},
-		},
-		{
-			name: "1",
-			data: []byte{1, 0},
-			expectedKey: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{1},
-			},
-		},
-		{
-			name: "00",
-			data: []byte{0, 1},
-			expectedKey: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0, 0},
-			},
-		},
-		{
-			name: "000",
-			data: []byte{0, 2},
-			expectedKey: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0, 0, 0},
-			},
-		},
-		{
-			name: "001",
-			expectedKey: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0, 0, 1},
-			},
-			data: []byte{1, 2},
-		},
-		{
-			name: "001",
-			expectedKey: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0, 0, 1},
-			},
-			data: []byte{1, 2},
-		},
-		{
-			name: "10101",
-			expectedKey: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{1, 0, 1, 0, 1},
-			},
-			data: []byte{21, 0},
-		},
-		{
-			name: "00010101",
-			expectedKey: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0, 0, 0, 1, 0, 1, 0, 1},
-			},
-			data: []byte{21, 3},
-		},
-		{
-			name: "00000000 001",
-			expectedKey: &key{
-				mostSigBytes: []byte{0},
-				leastSigBits: []int{0, 0, 1},
-			},
-			data: []byte{0, 1, 2},
-		},
-		{
-			name: "00000000 11111111 001",
-			expectedKey: &key{
-				mostSigBytes: []byte{0, 255},
-				leastSigBits: []int{0, 0, 1},
-			},
-			data: []byte{0, 255, 1, 2},
-		},
-		{
-			name: "00000101 11111111 101",
-			expectedKey: &key{
-				mostSigBytes: []byte{5, 255},
-				leastSigBits: []int{1, 0, 1},
-			},
-			data: []byte{5, 255, 5, 0},
-		},
-		{
-			name: "00000101 11111111",
-			expectedKey: &key{
-				mostSigBytes: []byte{5},
-				leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
-			},
-			data: []byte{5, 255, 0},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// create a new key from the bytes
-			got := new(key).fromBytes(test.data)
-			// compare got vs expected
-			require.Equal(t, test.expectedKey, got)
-		})
-	}
-}
-
-func TestKeyEncode(t *testing.T) {
-	tests := []struct {
-		name            string
-		key             *key
-		expectedEncoded []byte
-	}{
-		{
-			name: "0",
-			key: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0},
-			},
-			expectedEncoded: []byte{0, 0},
-		},
-		{
-			name: "1",
-			key: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{1},
-			},
-			expectedEncoded: []byte{1, 0},
-		},
-		{
-			name: "00",
-			key: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0, 0},
-			},
-			expectedEncoded: []byte{0, 1},
-		},
-		{
-			name: "000",
-			key: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0, 0, 0},
-			},
-			expectedEncoded: []byte{0, 2},
-		},
-		{
-			name: "001",
-			key: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0, 0, 1},
-			},
-			expectedEncoded: []byte{1, 2},
-		},
-		{
-			name: "10101",
-			key: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{1, 0, 1, 0, 1},
-			},
-			expectedEncoded: []byte{21, 0},
-		},
-		{
-			name: "00010101",
-			key: &key{
-				mostSigBytes: []byte{},
-				leastSigBits: []int{0, 0, 0, 1, 0, 1, 0, 1},
-			},
-			expectedEncoded: []byte{21, 3},
-		},
-		{
-			name: "00000000 001",
-			key: &key{
-				mostSigBytes: []byte{0},
-				leastSigBits: []int{0, 0, 1},
-			},
-			expectedEncoded: []byte{0, 1, 2},
-		},
-		{
-			name: "00000000 11111111 001",
-			key: &key{
-				mostSigBytes: []byte{0, 255},
-				leastSigBits: []int{0, 0, 1},
-			},
-			expectedEncoded: []byte{0, 255, 1, 2},
-		},
-		{
-			name: "00000101 11111111 101",
-			key: &key{
-				mostSigBytes: []byte{5, 255},
-				leastSigBits: []int{1, 0, 1},
-			},
-			expectedEncoded: []byte{5, 255, 5, 0},
-		},
-		{
-			name: "00000101 11111111",
-			key: &key{
-				mostSigBytes: []byte{5},
-				leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1, 1},
-			},
-			expectedEncoded: []byte{5, 255, 0},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// get the bytes of the pre-made key
-			got := test.key.bytes()
-			// compare got vs expected
-			require.Equal(t, test.expectedEncoded, got)
-		})
-	}
-}
-
-func TestBitsToBytes(t *testing.T) {
-	tests := []struct {
-		name     string
-		ba       []int
-		expected byte
-	}{
-		{
-			name:     "nil bit array to 0 byte",
-			ba:       nil,
-			expected: byte(0b00000000),
-		},
-		{
-			name:     "0101",
-			ba:       []int{0, 1, 0, 1},
-			expected: byte(0b00000101),
-		},
-		{
-			name:     "1010",
-			ba:       []int{1, 0, 1, 0},
-			expected: byte(0b00001010),
-		},
-		{
-			name:     "11011",
-			ba:       []int{1, 1, 0, 1, 1},
-			expected: byte(0b00011011),
-		},
-		{
-			name:     "11111111",
-			ba:       []int{1, 1, 1, 1, 1, 1, 1, 1},
-			expected: byte(0b11111111),
-		},
-		{
-			name:     "00000000",
-			ba:       []int{0, 0, 0, 0, 0, 0, 0, 0},
-			expected: byte(0b00000000),
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// create a new key
-			k := new(key)
-			// convert the bits to a byte
-			got := k.bitsToByte(test.ba)
-			// compare got vs expected
-			require.Equal(t, test.expected, got, fmt.Sprintf("Expected: %8b, Got: %8b\n", test.expected, got))
-		})
-	}
-}
-
-func TestBytesToBits(t *testing.T) {
-	tests := []struct {
-		name          string
-		byt           byte
-		leadingZeroes int
-		expected      []int
-	}{
-		{
-			name:          "zero",
-			byt:           0,
-			leadingZeroes: 0,
-			expected:      []int{0},
-		},
-		{
-			name:          "0001",
-			byt:           byte(0b1),
-			leadingZeroes: 3,
-			expected:      []int{0, 0, 0, 1},
-		},
-		{
-			name:          "01011",
-			byt:           byte(0b1011),
-			leadingZeroes: 1,
-			expected:      []int{0, 1, 0, 1, 1},
-		},
-		{
-			name:          "00100100",
-			byt:           byte(0b00100100),
-			leadingZeroes: 2,
-			expected:      []int{0, 0, 1, 0, 0, 1, 0, 0},
-		},
-		{
-			name:          "00000000",
-			byt:           byte(0b00000000),
-			leadingZeroes: 7,
-			expected:      []int{0, 0, 0, 0, 0, 0, 0, 0},
-		},
-		{
-			name:          "11111111",
-			byt:           byte(0b11111111),
-			leadingZeroes: 0,
-			expected:      []int{1, 1, 1, 1, 1, 1, 1, 1},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// create a new key
-			k := new(key)
-			// convert the byte to bits, adding the leading zeroes
-			got := k.byteToBits(test.byt, test.leadingZeroes)
-			// compare got vs expected
-			require.Equal(t, test.expected, got, fmt.Sprintf("Expected: %v, Got: %v\n", test.expected, got))
 		})
 	}
 }
@@ -2094,45 +1811,6 @@ func TestStoreProof(t *testing.T) {
 	}
 }
 
-func FuzzBytesToBits(f *testing.F) {
-	// seed corpus
-	tests := []struct {
-		byt           byte
-		leadingZeroes int
-	}{
-		// seed input comes from TestBytesToBits
-		{0, 0},
-		{byte(0b1), 3},
-		{byte(0b1011), 1},
-		{byte(0b00100100), 2},
-		{byte(0b00000000), 7},
-	}
-	for _, test := range tests {
-		// add the seed to the fuzz test
-		f.Add(test.byt, test.leadingZeroes)
-	}
-	f.Fuzz(func(t *testing.T, byt byte, leadingZeroes int) {
-		// as the values are appended, negative values are not allowed
-		if leadingZeroes < 0 {
-			t.Skip("Skipping test: leadingZeroes must be positive")
-		}
-		// create a new key to perform the conversion
-		k := new(key)
-		// convert the byt to bits with leading zeroes
-		bits := k.byteToBits(byt, leadingZeroes)
-		// convert it back again using the previous result as the input
-		keyBites := k.bitsToByte(bits)
-		// Create a bitmask to clear the first N bits
-		// For example, if n = 3, the mask will be 0b11111000
-		// This is to imitate the leading zeroes append of byteToBits
-		mask := byte(0xFF >> leadingZeroes) // 0xFF is 11111111 in binary
-		// Apply the mask to the byte
-		mask = byt & mask
-		// compare the original masked byte against the key bytes
-		require.Equal(t, mask, keyBites)
-	})
-}
-
 func FuzzKeyDecodeEncode(f *testing.F) {
 	// seed corpus
 	tests := []struct {
@@ -2184,6 +1862,8 @@ func NewTestSMT(t *testing.T, preset *NodeList, root []byte, keyBitSize int) (*S
 	smt := &SMT{
 		store:        memStore,
 		keyBitLength: keyBitSize,
+		nodeCache:    make(map[uint64]*node, MaxCacheSize),
+		OpData:       OpData{},
 	}
 	// update root
 	smt.root = preset.Nodes[0]
@@ -2198,12 +1878,14 @@ func NewTestSMT(t *testing.T, preset *NodeList, root []byte, keyBitSize int) (*S
 // newTestNode creates a new node with the given key, value, left and right child keys
 func newTestNode(k string, value []byte, leftChildKey, rightChildKey string) *node {
 	// create the key bytes for the left child
-	leftKey := keyFromByteStr(leftChildKey)
+	leftKey := keyBytesFromStr(leftChildKey)
 	// create the key bytes for the right child
-	rightKey := keyFromByteStr(rightChildKey)
+	rightKey := keyBytesFromStr(rightChildKey)
 	// create the node
 	return &node{
-		Key: new(key).fromBytes(keyBytesFromStr(k)),
+		Key: &key{
+			key: keyBytesFromStr(k),
+		},
 		Node: lib.Node{
 			Value:         value,
 			LeftChildKey:  leftKey,
@@ -2212,64 +1894,29 @@ func newTestNode(k string, value []byte, leftChildKey, rightChildKey string) *no
 	}
 }
 
-// keyFromByteStr converts a string of binary bits to a byte slice produced by the key least significant bits, or nil if the string is empty
-func keyFromByteStr(str string) []byte {
-	// convert the string to a byte slice
-	keyBytes := bytesFromStr(str)
-	// create the bits slice to be used by the key
-	bits := make([]int, 0)
-	for _, l := range keyBytes {
-		// convert the byte to bits
-		bits = append(bits, new(key).byteToBits(l, 0)[0])
-	}
+// keyBytesFromStr converts a string of binary bits to a byte slice
+// CONTRACT: str must be < than 8 bits
+func keyBytesFromStr(str string) []byte {
 	// create a new key from the byts
 	var byts []byte
 	if str != "" {
+		leftPadding := 0
+		for _, ch := range str {
+			if ch != '0' {
+				break
+			}
+			leftPadding++
+		}
+		if leftPadding == len(str) {
+			leftPadding--
+		}
+		val, _ := strconv.ParseUint(str, 2, 8)
 		// convert the bits to bytes now producing the key
-		byts = (&key{leastSigBits: bits}).bytes()
+		byts = []byte{byte(val), byte(leftPadding)}
+		for i := 0; i < len(byts)-1; i++ {
+			fmt.Printf("%08b ", byts[i])
+		}
 	}
 	// return the key bytes
-	return byts
-}
-
-// bitsFromStr converts a string of binary bits to an int slice
-func bitsFromStr(k string) []int {
-	// create the bits slice
-	bits := make([]int, 0, len(k))
-	for _, ch := range k {
-		// convert the character to an int
-		digit, err := strconv.Atoi(string(ch))
-		if err != nil {
-			// panic if the conversion fails
-			panic(err)
-		}
-		// append the digit to the bits slice
-		bits = append(bits, digit)
-	}
-	// return the bits slice
-	return bits
-}
-
-// keyBytesFromStr converts a string of binary bits to a byte slice from
-// the key's least significant bits
-func keyBytesFromStr(bits string) []byte {
-	return (&key{leastSigBits: bitsFromStr(bits)}).bytes()
-}
-
-// bytesFromStr converts a string of binary bits to a byte slice
-func bytesFromStr(k string) []byte {
-	// create the byts slice
-	byts := make([]byte, 0, len(k))
-	for _, ch := range k {
-		// convert the character to an int
-		digit, err := strconv.Atoi(string(ch))
-		if err != nil {
-			// panic if the conversion fails
-			panic(err)
-		}
-		// convert the digit to bytes and append it to the bytes slice
-		byts = append(byts, byte(digit))
-	}
-	// return the bytes slice
 	return byts
 }
