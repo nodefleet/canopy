@@ -312,6 +312,7 @@ const (
 	CodeReadBytes              ErrorCode   = 14
 	CodeFlushMemTable          ErrorCode   = 15
 	CodeStoreIterator          ErrorCode   = 16
+	CodeStoreCommitted         ErrorCode   = 17
 
 	RPCModule             ErrorModule = "rpc"
 	CodeRPCTimeout        ErrorCode   = 1

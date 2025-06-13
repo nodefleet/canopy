@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -130,7 +131,7 @@ func TestVersionedStoreGet(t *testing.T) {
 			db := newTestDb(t)
 			defer db.Close()
 			// initialize VersionedStore
-			store := NewVersionedStore(db.NewSnapshot(), tt.version, false)
+			store := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version, false)
 			// apply the store state setup function
 			tt.storeState(t, store, db)
 			// update the store snapshot to ensure access to the latest data
@@ -145,6 +146,179 @@ func TestVersionedStoreGet(t *testing.T) {
 				assert.Nil(t, err)
 				assert.True(t, bytes.Equal(tt.expectedValue, result))
 			}
+		})
+	}
+}
+
+func TestVersionedStoreSet(t *testing.T) {
+	tests := []struct {
+		name string
+		// operations to test over
+		operations      func(t *testing.T, vs *VersionedStore) error
+		key             []byte
+		expectedValue   []byte
+		expectedError   lib.ErrorI
+		version         uint64
+		readUncommitted bool
+	}{
+		{
+			name: "empty key returns ErrInvalidKey",
+			operations: func(t *testing.T, vs *VersionedStore) error {
+				return vs.Set(nil, nil)
+			},
+			key:           nil,
+			expectedValue: nil,
+			expectedError: ErrInvalidKey(),
+		},
+		{
+			name: "basic set operation",
+			operations: func(t *testing.T, vs *VersionedStore) error {
+				return vs.Set([]byte("key"), []byte("value"))
+			},
+			key:           []byte("key"),
+			expectedValue: []byte("value"),
+			expectedError: nil,
+		},
+		{
+			name: "set empty value",
+			operations: func(t *testing.T, vs *VersionedStore) error {
+				return vs.Set([]byte("key"), nil)
+			},
+			key:           []byte("key"),
+			expectedValue: nil,
+			expectedError: nil,
+		},
+		{
+			name: "update existing uncommitted key",
+			operations: func(t *testing.T, vs *VersionedStore) error {
+				require.NoError(t, vs.Set([]byte("key"), []byte("value")))
+				return vs.Set([]byte("key"), []byte("new_value"))
+			},
+			key:           []byte("key"),
+			expectedValue: []byte("new_value"),
+			expectedError: nil,
+		},
+		{
+			name: "set after commit",
+			operations: func(t *testing.T, vs *VersionedStore) error {
+				require.NoError(t, vs.Set([]byte("key"), []byte("value")))
+				require.NoError(t, vs.Commit())
+				return vs.Set([]byte("key"), []byte("new_value"))
+			},
+			key:           []byte("key"),
+			expectedValue: nil,
+			expectedError: ErrStoreCommitted(),
+		},
+		{
+			name: "cannot read uncommitted changes",
+			operations: func(t *testing.T, vs *VersionedStore) error {
+				require.NoError(t, vs.Set([]byte("key"), []byte("value")))
+				value, err := vs.Get([]byte("key"))
+				require.NoError(t, err)
+				require.Nil(t, value)
+				return nil
+			},
+			key:           []byte("key"),
+			expectedValue: []byte("value"),
+			expectedError: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// setup pebble DB
+			db := newTestDb(t)
+			defer db.Close()
+			// initialize VersionedStore
+			var batch *pebble.Batch
+			// set batch type based on readUncommitted flag
+			batch = db.NewBatch()
+			if tt.readUncommitted {
+				batch = db.NewIndexedBatch()
+			}
+			store := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			// apply the store state setup function
+			err := tt.operations(t, store)
+			if tt.expectedError != nil {
+				assert.NotNil(t, err)
+				assert.Equal(t, tt.expectedError, err)
+				return
+			}
+			// commit the store to persist changes
+			require.NoError(t, store.Commit())
+			// update the store snapshot to ensure access to the latest data
+			store = NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version+1, false)
+			// get the latest value for the key
+			result, err := store.Get(tt.key)
+			// assert results
+			assert.Nil(t, err)
+			assert.True(t, bytes.Equal(tt.expectedValue, result))
+		})
+	}
+}
+
+func TestVersionedStoreDelete(t *testing.T) {
+	tests := []struct {
+		name string
+		// operations to test over
+		operations      func(t *testing.T, vs *VersionedStore) error
+		key             []byte
+		expectedValue   []byte
+		expectedError   lib.ErrorI
+		version         uint64
+		readUncommitted bool
+	}{
+		{
+			name: "empty key returns ErrInvalidKey",
+			operations: func(t *testing.T, vs *VersionedStore) error {
+				return vs.Delete(nil)
+			},
+			expectedError: ErrInvalidKey(),
+		},
+		{
+			name: "set then delete should return nil",
+			operations: func(t *testing.T, vs *VersionedStore) error {
+				require.NoError(t, vs.Set([]byte("key"), []byte("value")))
+				val, err := vs.Get([]byte("key"))
+				require.NoError(t, err)
+				require.True(t, bytes.Equal(val, []byte("value")))
+				return vs.Delete([]byte("key"))
+			},
+			expectedValue:   nil,
+			key:             []byte("key"),
+			readUncommitted: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// setup pebble DB
+			db := newTestDb(t)
+			defer db.Close()
+			// initialize VersionedStore
+			var batch *pebble.Batch
+			// set batch type based on readUncommitted flag
+			batch = db.NewBatch()
+			if tt.readUncommitted {
+				batch = db.NewIndexedBatch()
+			}
+			store := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			// apply the store state setup function
+			err := tt.operations(t, store)
+			if tt.expectedError != nil {
+				assert.NotNil(t, err)
+				assert.Equal(t, tt.expectedError, err)
+				return
+			}
+			// commit the store to persist changes
+			require.NoError(t, store.Commit())
+			// update the store snapshot to ensure access to the latest data
+			store = NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version+1, false)
+			// get the latest value for the key
+			result, err := store.Get(tt.key)
+			// assert results
+			assert.Nil(t, err)
+			assert.True(t, bytes.Equal(tt.expectedValue, result))
 		})
 	}
 }
@@ -214,13 +388,54 @@ func TestKeyVersioning(t *testing.T) {
 	}
 }
 
-func newTestDb(t *testing.T) *pebble.DB {
-	db, err := pebble.Open("", &pebble.Options{
-		// Set options as needed for testing
-		FS: vfs.NewMem(),
-	})
-	assert.NoError(t, err)
-	return db
+func TestGetSetDeleteVersioned(t *testing.T) {
+	// setup pebble DB
+	db := newTestDb(t)
+	defer db.Close()
+	version := uint64(1)
+	// initialize VersionedStore
+	vs := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), version, false)
+	// set a key
+	key := []byte("key")
+	require.NoError(t, vs.Set(key, []byte("value")))
+	// get the key when readUncommitted is false
+	value, err := vs.Get(key)
+	require.NoError(t, err)
+	assert.Nil(t, value)
+	// commit
+	require.NoError(t, vs.Commit())
+	// update the store snapshot to ensure access to the latest data
+	version++
+	vs = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	// get the key when readUncommitted is true
+	value, err = vs.Get(key)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(value, []byte("value")))
+	// set a new value for the key
+	require.NoError(t, vs.Set(key, []byte("new_value")))
+	value, err = vs.Get(key)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(value, []byte("new_value")))
+	// delete the key
+	err = vs.Delete(key)
+	require.NoError(t, err)
+	// commit
+	require.NoError(t, vs.Commit())
+	// update the store snapshot to ensure access to the latest data
+	version++
+	vs = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	// get the key after deletion
+	value, err = vs.Get(key)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(value, nil))
+	// lower the store version
+	version--
+	vs = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	// get the key after deletion
+	value, err = vs.Get(key)
+	require.NoError(t, err)
+	fmt.Printf("a: %s b: %s\n", value, []byte("value"))
+	assert.True(t, bytes.Equal(value, []byte("value")))
 }
 
 func BenchmarkGet(b *testing.B) {
@@ -229,7 +444,7 @@ func BenchmarkGet(b *testing.B) {
 	})
 	require.NoError(b, err)
 	defer db.Close()
-	vs := NewVersionedStore(db.NewSnapshot(), 1, false)
+	vs := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 1, false)
 
 	// amount of keys per version
 	version0 := 500
@@ -257,4 +472,13 @@ func BenchmarkGet(b *testing.B) {
 		require.NoError(b, err)
 		require.NotNil(b, value, "Expected value to be non-nil for idx %d", i)
 	}
+}
+
+func newTestDb(t *testing.T) *pebble.DB {
+	db, err := pebble.Open("", &pebble.Options{
+		// Set options as needed for testing
+		FS: vfs.NewMem(),
+	})
+	assert.NoError(t, err)
+	return db
 }
