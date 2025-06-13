@@ -38,6 +38,10 @@ func ErrStoreGet(err error) lib.ErrorI {
 	return lib.NewError(lib.CodeStoreGet, lib.StorageModule, fmt.Sprintf("store.get() failed with err: %s", err.Error()))
 }
 
+func ErrStoreIterator(err error) lib.ErrorI {
+	return lib.NewError(lib.CodeStoreIterator, lib.StorageModule, fmt.Sprintf("store.iterator() failesd with err: %s", err.Error()))
+}
+
 func ErrFlushBatch(err error) lib.ErrorI {
 	return lib.NewError(lib.CodeFlushBatch, lib.StorageModule, fmt.Sprintf("flushBatch() failed with err: %s", err.Error()))
 }
