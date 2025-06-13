@@ -14,8 +14,9 @@ import (
 
 func TestVersionedStoreGet(t *testing.T) {
 	tests := []struct {
-		name          string
-		storeState    func(t *testing.T, vs *VersionedStore, db *pebble.DB) // Function to prepare the store state (e.g., prepopulate data)
+		name string
+		// function to prepare the store state (e.g., prepopulate data)
+		storeState    func(t *testing.T, vs *VersionedStore, db *pebble.DB)
 		key           []byte
 		expectedValue []byte
 		expectedError lib.ErrorI
@@ -76,6 +77,22 @@ func TestVersionedStoreGet(t *testing.T) {
 			version:       10,
 		},
 		{
+			name: "fetch existing key at specific version",
+			storeState: func(t *testing.T, vs *VersionedStore, db *pebble.DB) {
+				key := []byte("specific-version-key")
+				err := db.Set(vs.makeVersionedKey(key, 0, false), []byte("value0"), pebble.Sync)
+				assert.NoError(t, err)
+				err = db.Set(vs.makeVersionedKey(key, 1, false), []byte("value1"), pebble.Sync)
+				assert.NoError(t, err)
+				err = db.Set(vs.makeVersionedKey(key, 2, false), []byte("value2"), pebble.Sync)
+				assert.NoError(t, err)
+			},
+			key:           []byte("specific-version-key"),
+			expectedValue: []byte("value1"),
+			expectedError: nil,
+			version:       1,
+		},
+		{
 			name: "tombstoned key at a lower version",
 			storeState: func(t *testing.T, vs *VersionedStore, db *pebble.DB) {
 				key := []byte("lower-version-key")
@@ -116,11 +133,9 @@ func TestVersionedStoreGet(t *testing.T) {
 			store := NewVersionedStore(db, tt.version, false)
 			// apply the store state setup function
 			tt.storeState(t, store, db)
-
-			// Invoke the method being tested
-			result, err := store.GetIter(tt.key)
-
-			// Assert results
+			// invoke the method being tested
+			result, err := store.Get(tt.key)
+			// assert results
 			if tt.expectedError != nil {
 				assert.NotNil(t, err)
 				assert.Equal(t, tt.expectedError, err)
@@ -187,9 +202,9 @@ func TestVersionedKeyFunctions(t *testing.T) {
 			extractedKey, extractedVersion, extractedTombstone, err := vs.getVersionedKey(versionedKey)
 			// Verify no errors occurred
 			require.NoError(t, err)
-			// check that the extracted key matches the original key
+			// check that the extracted key matches the original
 			require.Equal(t, tt.key, extractedKey)
-			// check that the extracted version matches the original version
+			// check that the extracted version matches the original
 			require.Equal(t, tt.version, extractedVersion)
 			// check that the extracted tombstone flag matches the original
 			require.Equal(t, tt.tombstone, extractedTombstone)

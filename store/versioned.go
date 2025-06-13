@@ -35,27 +35,12 @@ func NewVersionedStore(db *pebble.DB, version uint64, readCache bool) *Versioned
 	}
 }
 
+// Get retrieves the value for a key at the latest version available.
 func (vs *VersionedStore) Get(key []byte) ([]byte, lib.ErrorI) {
-	// sanity check for empty key
-	if len(key) == 0 {
-		return nil, ErrInvalidKey()
-	}
-	// create a composite key with the current version and no tombstone marker
-	compositeKey := vs.makeVersionedKey(key, vs.Version(), false)
-	// retrieve the value from the database
-	value, closer, err := vs.db.Get(compositeKey)
-	// if the key is found, return the value
-	if err == nil {
-		// ensure the closer is closed to release resources
-		defer closer.Close()
-		// copy the value before returning (since the original may get overwritten)
-		valueCopy := make([]byte, len(value))
-		copy(valueCopy, value)
-		return valueCopy, nil
-	}
-	// check for errors not related to key not found
-	if !errors.Is(err, pebble.ErrNotFound) {
-		return nil, ErrStoreGet(err)
+	// helper function to get the value for a key at given version
+	value, err := vs.get(key, vs.Version())
+	if err != nil && value == nil {
+		return nil, err
 	}
 	// at this point, err == pebble.ErrNotFound
 	// look for the existing key at a lower version or with a tombstone marker
@@ -65,9 +50,9 @@ func (vs *VersionedStore) Get(key []byte) ([]byte, lib.ErrorI) {
 		// highest possible version (tombstone), endBytes added as is not inclusive
 		UpperBound: lib.Append(vs.makeVersionedKey(key, vs.Version(), true), endBytes),
 	}
-	iter, err := vs.db.NewIter(iterOpts)
-	if err != nil {
-		return nil, ErrStoreGet(err)
+	iter, iterErr := vs.db.NewIter(iterOpts)
+	if iterErr != nil {
+		return nil, ErrStoreGet(iterErr)
 	}
 	// ensure the iterator is closed after use
 	defer iter.Close()
@@ -81,7 +66,7 @@ func (vs *VersionedStore) Get(key []byte) ([]byte, lib.ErrorI) {
 		// valid key found, check if it matches the requested key
 		if bytes.Equal(key, iterKey) {
 			if tombstone {
-				// if we find a tombstone, return nil to indicate the key is deleted
+				// return nil to indicate that the key does not exist
 				return nil, nil
 			}
 			// if the key matches, return the value
@@ -120,7 +105,7 @@ func (vs *VersionedStore) GetIter(key []byte) ([]byte, lib.ErrorI) {
 		// valid key found, check if it matches the requested key
 		if bytes.Equal(key, iterKey) {
 			if tombstone {
-				// if we find a tombstone, return nil to indicate the key is deleted
+				// return nil to indicate that the key does not exist
 				return nil, nil
 			}
 			// if the key matches, return the value
@@ -129,6 +114,32 @@ func (vs *VersionedStore) GetIter(key []byte) ([]byte, lib.ErrorI) {
 	}
 	// if no valid key is found, return nil to indicate the key does not exist
 	return nil, nil
+}
+
+// get retrieves the value for a key at a specific version
+func (vs *VersionedStore) get(key []byte, version uint64) ([]byte, lib.ErrorI) {
+	// sanity check for empty key
+	if len(key) == 0 {
+		return nil, ErrInvalidKey()
+	}
+	// create a composite key with the current version and no tombstone marker
+	compositeKey := vs.makeVersionedKey(key, version, false)
+	// retrieve the value from the database
+	value, closer, err := vs.db.Get(compositeKey)
+	// if the key is found, return the value
+	if err != nil {
+		// check for errors not related to key not found
+		if !errors.Is(err, pebble.ErrNotFound) {
+			return nil, ErrStoreGet(err)
+		}
+		return nil, nil // key not found, return nil
+	}
+	// ensure the closer is closed to release resources
+	defer closer.Close()
+	// copy the value before returning (since the original may get overwritten)
+	valueCopy := make([]byte, len(value))
+	copy(valueCopy, value)
+	return valueCopy, nil
 }
 
 func (vs *VersionedStore) Iterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
