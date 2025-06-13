@@ -62,9 +62,9 @@ func (vs *VersionedStore) Get(key []byte) (value []byte, err lib.ErrorI) {
 	// look for the existing key at a lower version or with a tombstone marker
 	iterOpts := &pebble.IterOptions{
 		// lowest possible version (live)
-		LowerBound: vs.makeVersionedKey(key, 0, false),
+		LowerBound: makeVersionedKey(key, 0, false),
 		// highest possible version (tombstone), endBytes added as is not inclusive
-		UpperBound: lib.Append(vs.makeVersionedKey(key, vs.Version(), true), endBytes),
+		UpperBound: lib.Append(makeVersionedKey(key, vs.Version(), true), endBytes),
 	}
 	iter, iterErr := vs.reader.NewIter(iterOpts)
 	if iterErr != nil {
@@ -75,7 +75,7 @@ func (vs *VersionedStore) Get(key []byte) (value []byte, err lib.ErrorI) {
 	// iterate through the keys to find the latest version or tombstone
 	for iter.Last(); iter.Valid(); iter.Prev() {
 		// retrieve the versioned key
-		iterKey, _, tombstone, err := vs.getVersionedKey(iter.Key())
+		iterKey, _, tombstone, err := getVersionedKey(iter.Key())
 		if err != nil || !bytes.Equal(key, iterKey) {
 			// if key cannot be parsed or doesn't match the requested key, skip it
 			continue
@@ -107,7 +107,7 @@ func (vs *VersionedStore) Set(key, value []byte) lib.ErrorI {
 func (vs *VersionedStore) Delete(key []byte) lib.ErrorI {
 	// actual deletion of live key if any. This is to prevent both a live a tombstone marker
 	// existing at the same time
-	vs.writer.Delete(vs.makeVersionedKey(key, vs.nextVersion(), false), nil)
+	vs.writer.Delete(makeVersionedKey(key, vs.nextVersion(), false), nil)
 	// set the value to nil to mark as deleted (tombstoned)
 	return vs.set(key, nil, true)
 }
@@ -122,7 +122,7 @@ func (vs *VersionedStore) set(key []byte, value []byte, tombstone bool) lib.Erro
 		return err
 	}
 	// create a composite key with the next version and no tombstone marker
-	versionedKey := vs.makeVersionedKey(key, vs.nextVersion(), tombstone)
+	versionedKey := makeVersionedKey(key, vs.nextVersion(), tombstone)
 	// set the value in the database
 	if err := vs.writer.Set(versionedKey, value, nil); err != nil {
 		return ErrStoreSet(err)
@@ -137,7 +137,7 @@ func (vs *VersionedStore) get(reader pebble.Reader, key []byte, version uint64) 
 		return nil, err
 	}
 	// create a composite key with the current version and no tombstone marker
-	versionedKey := vs.makeVersionedKey(key, version, false)
+	versionedKey := makeVersionedKey(key, version, false)
 	// retrieve the value from the database
 	value, closer, err := reader.Get(versionedKey)
 	// if the key is found, return the value
@@ -174,8 +174,19 @@ func (vs *VersionedStore) Commit() lib.ErrorI {
 }
 
 func (vs *VersionedStore) Iterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
-	//TODO implement me
-	panic("implement me")
+	it, err := vs.reader.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: prefixEnd(prefix),
+		SkipPoint: func(userKey []byte) bool {
+			// skip tombstoned keys
+			return userKey[len(userKey)-1] == TombstoneMarker
+		},
+	})
+	if err != nil {
+		return nil, ErrStoreIterator(err)
+	}
+	it.First()
+	return NewVersionedIterator(it, false, vs.version), nil
 }
 
 func (vs *VersionedStore) RevIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
@@ -185,17 +196,24 @@ func (vs *VersionedStore) RevIterator(prefix []byte) (lib.IteratorI, lib.ErrorI)
 
 // makeVersionedKey sets a composite key with the current version
 // Format: [ActualKey][8-byte Version][1-byte TombstoneMarker]
-func (vs *VersionedStore) makeVersionedKey(key []byte, version uint64, tombstone bool) []byte {
-	var marker byte = LiveMarker
+func makeVersionedKey(key []byte, version uint64, tombstone bool) []byte {
+	// pre-allocate a buffer with the exact size needed
+	buff := make([]byte, len(key)+VersionSize+1)
+	// copy the key directly into the beginning of the buffer
+	copy(buff, key)
+	// encode version directly into the buffer at the appropriate offset
+	binary.BigEndian.PutUint64(buff[len(key):], version)
+	// set the tombstone marker at the end
 	if tombstone {
-		marker = TombstoneMarker
+		buff[len(buff)-1] = TombstoneMarker
+	} else {
+		buff[len(buff)-1] = LiveMarker
 	}
-	encodedVersion := vs.encodeBigEndian(version)
-	return lib.Append(key, lib.Append(encodedVersion, []byte{marker}))
+	return buff
 }
 
 // getVersionedKey extracts the actual key, version, and tombstone marker from a versioned key.
-func (vs *VersionedStore) getVersionedKey(key []byte) (actualKey []byte, version uint64, tombstone bool, err error) {
+func getVersionedKey(key []byte) (actualKey []byte, version uint64, tombstone bool, err error) {
 	keyLen := len(key)
 	if keyLen < VersionSize+1 {
 		return nil, 0, false, ErrInvalidKey()
@@ -208,13 +226,6 @@ func (vs *VersionedStore) getVersionedKey(key []byte) (actualKey []byte, version
 	// extract the actual key part
 	actualKey = key[:versionIdx]
 	return actualKey, version, tombstone, nil
-}
-
-// encodeBigEndian encodes a uint64 value into a byte slice in big-endian order using VersionSize bytes.
-func (vs *VersionedStore) encodeBigEndian(i uint64) []byte {
-	b := make([]byte, VersionSize)
-	binary.BigEndian.PutUint64(b, i)
-	return b
 }
 
 // Version returns the current version of the store.
@@ -235,4 +246,71 @@ func validateKey(key []byte) lib.ErrorI {
 	}
 	// exit
 	return nil
+}
+
+// VersionedIterator CODE BELOW
+
+// VersionedIterator is an iterator that allows iterating over versioned keys in a Pebble database.
+type VersionedIterator struct {
+	iter    *pebble.Iterator
+	reverse bool
+	version uint64
+}
+
+// NewVersionedIterator creates a new VersionedIterator
+func NewVersionedIterator(iter *pebble.Iterator, reverse bool, version uint64) *VersionedIterator {
+	return &VersionedIterator{
+		iter:    iter,
+		reverse: reverse,
+		version: version,
+	}
+}
+
+func (vi *VersionedIterator) Valid() bool {
+	return vi.iter.Valid()
+}
+
+func (vi *VersionedIterator) Next() {
+	if !vi.Valid() {
+		return
+	}
+	vi.iter.Next()
+}
+
+func (vi *VersionedIterator) Prev() {
+	if !vi.Valid() {
+		return
+	}
+	vi.iter.Prev()
+}
+
+func (vi *VersionedIterator) Key() []byte {
+	if !vi.Valid() {
+		return nil
+	}
+	key := vi.iter.Key()
+	// extract the actual key, version, and tombstone marker
+	actualKey, _, _, err := getVersionedKey(key)
+	if err != nil {
+		return nil // or handle error appropriately
+	}
+	return actualKey
+}
+
+func (vi *VersionedIterator) Value() []byte {
+	if !vi.Valid() {
+		return nil
+	}
+	value := vi.iter.Value()
+	if value == nil {
+		return nil
+	}
+	// copy the value to return it safely
+	valueCopy := make([]byte, len(value))
+	copy(valueCopy, value)
+	return valueCopy
+}
+
+func (vi *VersionedIterator) Close() {
+	vi.iter.Close()
 }

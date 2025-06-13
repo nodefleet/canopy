@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"strconv"
 	"testing"
 
@@ -42,7 +43,7 @@ func TestVersionedStoreGet(t *testing.T) {
 			storeState: func(t *testing.T, vs *VersionedStore, db *pebble.DB) {
 				key := []byte("existing-key")
 				value := []byte("value")
-				err := db.Set(vs.makeVersionedKey(key,
+				err := db.Set(makeVersionedKey(key,
 					vs.version, false), value, pebble.Sync)
 				assert.NoError(t, err)
 			},
@@ -55,7 +56,7 @@ func TestVersionedStoreGet(t *testing.T) {
 			storeState: func(t *testing.T, vs *VersionedStore, db *pebble.DB) {
 				key := []byte("tombstoned-key")
 				value := []byte("value")
-				err := db.Set(vs.makeVersionedKey(key,
+				err := db.Set(makeVersionedKey(key,
 					vs.nextVersion(), true), value, pebble.Sync)
 				assert.NoError(t, err)
 			},
@@ -67,9 +68,9 @@ func TestVersionedStoreGet(t *testing.T) {
 			name: "fetch existing key at a lower version",
 			storeState: func(t *testing.T, vs *VersionedStore, db *pebble.DB) {
 				key := []byte("lower-version-key")
-				err := db.Set(vs.makeVersionedKey(key, 0, false), []byte("value0"), pebble.Sync)
+				err := db.Set(makeVersionedKey(key, 0, false), []byte("value0"), pebble.Sync)
 				assert.NoError(t, err)
-				err = db.Set(vs.makeVersionedKey(key, 1, false), []byte("value1"), pebble.Sync)
+				err = db.Set(makeVersionedKey(key, 1, false), []byte("value1"), pebble.Sync)
 				assert.NoError(t, err)
 			},
 			key:           []byte("lower-version-key"),
@@ -81,11 +82,11 @@ func TestVersionedStoreGet(t *testing.T) {
 			name: "fetch existing key at specific version",
 			storeState: func(t *testing.T, vs *VersionedStore, db *pebble.DB) {
 				key := []byte("specific-version-key")
-				err := db.Set(vs.makeVersionedKey(key, 0, false), []byte("value0"), pebble.Sync)
+				err := db.Set(makeVersionedKey(key, 0, false), []byte("value0"), pebble.Sync)
 				assert.NoError(t, err)
-				err = db.Set(vs.makeVersionedKey(key, 1, false), []byte("value1"), pebble.Sync)
+				err = db.Set(makeVersionedKey(key, 1, false), []byte("value1"), pebble.Sync)
 				assert.NoError(t, err)
-				err = db.Set(vs.makeVersionedKey(key, 2, false), []byte("value2"), pebble.Sync)
+				err = db.Set(makeVersionedKey(key, 2, false), []byte("value2"), pebble.Sync)
 				assert.NoError(t, err)
 			},
 			key:           []byte("specific-version-key"),
@@ -98,9 +99,9 @@ func TestVersionedStoreGet(t *testing.T) {
 			storeState: func(t *testing.T, vs *VersionedStore, db *pebble.DB) {
 				key := []byte("lower-version-key")
 				value := []byte("value")
-				err := db.Set(vs.makeVersionedKey(key, 0, false), value, pebble.Sync)
+				err := db.Set(makeVersionedKey(key, 0, false), value, pebble.Sync)
 				assert.NoError(t, err)
-				err = db.Set(vs.makeVersionedKey(key, 1, true), value, pebble.Sync)
+				err = db.Set(makeVersionedKey(key, 1, true), value, pebble.Sync)
 				assert.NoError(t, err)
 			},
 			key:           []byte("lower-version-key"),
@@ -113,9 +114,9 @@ func TestVersionedStoreGet(t *testing.T) {
 			storeState: func(t *testing.T, vs *VersionedStore, db *pebble.DB) {
 				key := []byte("current-version-key")
 				value := []byte("value")
-				err := db.Set(vs.makeVersionedKey(key, 1, false), value, pebble.Sync)
+				err := db.Set(makeVersionedKey(key, 1, false), value, pebble.Sync)
 				assert.NoError(t, err)
-				err = db.Set(vs.makeVersionedKey(key, 10, true), value, pebble.Sync)
+				err = db.Set(makeVersionedKey(key, 10, true), value, pebble.Sync)
 				assert.NoError(t, err)
 			},
 			key:           []byte("current-version-key"),
@@ -363,7 +364,7 @@ func TestKeyVersioning(t *testing.T) {
 		{
 			name:      "max version value",
 			key:       []byte("maxversion"),
-			version:   18446744073709551615, // max uint64 value
+			version:   math.MaxUint64,
 			tombstone: false,
 		},
 	}
@@ -371,11 +372,10 @@ func TestKeyVersioning(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// create versioned store instance
-			vs := &VersionedStore{version: tt.version}
 			// test round-trip: make versioned key and then extract the parts
-			versionedKey := vs.makeVersionedKey(tt.key, tt.version, tt.tombstone)
+			versionedKey := makeVersionedKey(tt.key, tt.version, tt.tombstone)
 			// extract the original parts using getVersionedKey
-			extractedKey, extractedVersion, extractedTombstone, err := vs.getVersionedKey(versionedKey)
+			extractedKey, extractedVersion, extractedTombstone, err := getVersionedKey(versionedKey)
 			// Verify no errors occurred
 			require.NoError(t, err)
 			// check that the extracted key matches the original
@@ -434,7 +434,6 @@ func TestGetSetDeleteVersioned(t *testing.T) {
 	// get the key after deletion
 	value, err = vs.Get(key)
 	require.NoError(t, err)
-	fmt.Printf("a: %s b: %s\n", value, []byte("value"))
 	assert.True(t, bytes.Equal(value, []byte("value")))
 }
 
@@ -453,14 +452,14 @@ func BenchmarkGet(b *testing.B) {
 	for i := range version0 {
 		key := []byte("key" + strconv.Itoa(i))
 		value := []byte("value" + strconv.Itoa(i))
-		err := db.Set(vs.makeVersionedKey(key, 0, false), value, pebble.Sync)
+		err := db.Set(makeVersionedKey(key, 0, false), value, pebble.Sync)
 		require.NoError(b, err)
 	}
 	// pre populate the store with some data at version 1
 	for i := version0; i < version1; i++ {
 		key := []byte("key" + strconv.Itoa(i))
 		value := []byte("value" + strconv.Itoa(i))
-		err := db.Set(vs.makeVersionedKey(key, 1, false), value, pebble.Sync)
+		err := db.Set(makeVersionedKey(key, 1, false), value, pebble.Sync)
 		require.NoError(b, err)
 	}
 	// update the versioned store to read from the latest snapshot
@@ -481,4 +480,32 @@ func newTestDb(t *testing.T) *pebble.DB {
 	})
 	assert.NoError(t, err)
 	return db
+}
+
+func TestVersionedIteratorBasic(t *testing.T) {
+	// setup pebble DB
+	db := newTestDb(t)
+	defer db.Close()
+
+	prefix := []byte("p/")
+	db.Set(append([]byte("a"), []byte("1")...), []byte("1"), pebble.Sync)
+	db.Set(append(prefix, []byte("1")...), []byte("1"), pebble.Sync)
+	db.Set(append(prefix, []byte("2")...), []byte("2"), pebble.Sync)
+	db.Set(append(prefix, append([]byte("3"), TombstoneMarker)...), []byte("3"), pebble.Sync)
+	db.Set(append(prefix, []byte("4")...), []byte("4"), pebble.Sync)
+	db.Set(append([]byte("z"), []byte("1")...), []byte("1"), pebble.Sync)
+	// initialize VersionedStore
+	vs := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 1, false)
+
+	// create an iterator
+	iter, err := vs.Iterator(prefix)
+	require.NoError(t, err)
+	defer iter.Close()
+
+	// iterate through the keys
+	for ; iter.Valid(); iter.Next() {
+		key := iter.Key()
+		value := iter.Value()
+		fmt.Printf("key: %s value %s \n", key, value)
+	}
 }
