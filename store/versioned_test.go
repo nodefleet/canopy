@@ -130,9 +130,11 @@ func TestVersionedStoreGet(t *testing.T) {
 			db := newTestDb(t)
 			defer db.Close()
 			// initialize VersionedStore
-			store := NewVersionedStore(db, tt.version, false)
+			store := NewVersionedStore(db.NewSnapshot(), tt.version, false)
 			// apply the store state setup function
 			tt.storeState(t, store, db)
+			// update the store snapshot to ensure access to the latest data
+			store.reader = db.NewSnapshot()
 			// invoke the method being tested
 			result, err := store.Get(tt.key)
 			// assert results
@@ -147,7 +149,7 @@ func TestVersionedStoreGet(t *testing.T) {
 	}
 }
 
-func TestVersionedKeyFunctions(t *testing.T) {
+func TestKeyVersioning(t *testing.T) {
 	tests := []struct {
 		name      string
 		key       []byte
@@ -221,61 +223,24 @@ func newTestDb(t *testing.T) *pebble.DB {
 	return db
 }
 
-func BenchmarkGetIter(b *testing.B) {
-	db, err := pebble.Open("", &pebble.Options{
-		FS: vfs.NewMem(),
-	})
-	require.NoError(b, err)
-	defer db.Close()
-	vs := NewVersionedStore(db, 1, false)
-
-	version0 := 0
-	version1 := 1000
-
-	// pre populate the store with some data at version 0
-	for i := 0; i < version0; i++ {
-		key := []byte("key" + strconv.Itoa(i))
-		value := []byte("value" + strconv.Itoa(i))
-		err := db.Set(vs.makeVersionedKey(key, 0, false), value, pebble.Sync)
-		require.NoError(b, err)
-	}
-
-	// pre populate the store with some data at version 1
-	for i := version0; i < version1; i++ {
-		key := []byte("key" + strconv.Itoa(i))
-		value := []byte("value" + strconv.Itoa(i))
-		err := db.Set(vs.makeVersionedKey(key, 1, false), value, pebble.Sync)
-		require.NoError(b, err)
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		key := []byte("key" + strconv.Itoa(i%version1))
-		value, err := vs.GetIter(key)
-		require.NoError(b, err)
-		require.NotNil(b, value, "Expected value to be non-nil for idx %d", i)
-	}
-}
-
 func BenchmarkGet(b *testing.B) {
 	db, err := pebble.Open("", &pebble.Options{
 		FS: vfs.NewMem(),
 	})
 	require.NoError(b, err)
 	defer db.Close()
-	vs := NewVersionedStore(db, 1, false)
+	vs := NewVersionedStore(db.NewSnapshot(), 1, false)
 
+	// amount of keys per version
 	version0 := 500
 	version1 := 500
-
 	// pre populate the store with some data at version 0
-	for i := 0; i < version0; i++ {
+	for i := range version0 {
 		key := []byte("key" + strconv.Itoa(i))
 		value := []byte("value" + strconv.Itoa(i))
 		err := db.Set(vs.makeVersionedKey(key, 0, false), value, pebble.Sync)
 		require.NoError(b, err)
 	}
-
 	// pre populate the store with some data at version 1
 	for i := version0; i < version1; i++ {
 		key := []byte("key" + strconv.Itoa(i))
@@ -283,7 +248,8 @@ func BenchmarkGet(b *testing.B) {
 		err := db.Set(vs.makeVersionedKey(key, 1, false), value, pebble.Sync)
 		require.NoError(b, err)
 	}
-
+	// update the versioned store to read from the latest snapshot
+	vs.reader = db.NewSnapshot()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		key := []byte("key" + strconv.Itoa(i%version1))
