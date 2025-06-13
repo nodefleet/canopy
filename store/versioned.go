@@ -173,7 +173,35 @@ func (vs *VersionedStore) Commit() lib.ErrorI {
 	return nil
 }
 
+// Version returns the current version of the store.
+func (vs *VersionedStore) Version() uint64 {
+	return vs.version
+}
+
+// nextVersion returns the next version number for the store.
+func (vs *VersionedStore) nextVersion() uint64 {
+	return vs.version + 1
+}
+
+// validateKey performs basic validation on the key.
+func validateKey(key []byte) lib.ErrorI {
+	// sanity check for empty key
+	if len(key) == 0 {
+		return ErrInvalidKey()
+	}
+	// exit
+	return nil
+}
+
 func (vs *VersionedStore) Iterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
+	return vs.iterator(prefix, false)
+}
+
+func (vs *VersionedStore) RevIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
+	return vs.iterator(prefix, true)
+}
+
+func (vs *VersionedStore) iterator(prefix []byte, reverse bool) (lib.IteratorI, lib.ErrorI) {
 	it, err := vs.reader.NewIter(&pebble.IterOptions{
 		LowerBound: prefix,
 		UpperBound: prefixEnd(prefix),
@@ -185,13 +213,105 @@ func (vs *VersionedStore) Iterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
 	if err != nil {
 		return nil, ErrStoreIterator(err)
 	}
-	it.First()
-	return NewVersionedIterator(it, false, vs.version), nil
+	return NewVersionedIterator(prefix, it, vs.version, reverse), nil
 }
 
-func (vs *VersionedStore) RevIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
-	//TODO implement me
-	panic("implement me")
+// VersionedIterator CODE BELOW
+
+// VersionedIterator is an iterator that allows iterating over versioned keys in a Pebble database.
+type VersionedIterator struct {
+	iter    *pebble.Iterator
+	version uint64
+	prefix  []byte
+	reverse bool
+
+	next func() bool
+	prev func() bool
+}
+
+// NewVersionedIterator creates a new VersionedIterator
+func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, reverse bool) *VersionedIterator {
+	if reverse {
+		// set the next and prev functions for reverse iteration
+		iter.Last()
+		return &VersionedIterator{
+			iter:    iter,
+			reverse: true,
+			version: version,
+			next:    iter.Prev,
+			prev:    iter.Next,
+		}
+	}
+
+	iter.First()
+	return &VersionedIterator{
+		iter:    iter,
+		reverse: reverse,
+		version: version,
+		next:    iter.Next,
+		prev:    iter.Prev,
+	}
+}
+
+func (vi *VersionedIterator) Valid() bool {
+	return vi.iter.Valid()
+}
+
+// Next moves the iterator to the next item in the versioned key space.
+func (vi *VersionedIterator) Next() {
+	// valid check
+	if !vi.Valid() {
+		return
+	}
+	// move to the next item
+	vi.next()
+}
+
+// Prev moves the iterator to the previous item in the versioned key space.
+func (vi *VersionedIterator) Prev() {
+	// valid check
+	if !vi.Valid() {
+		return
+	}
+	// move to the previous item
+	vi.prev()
+}
+
+// Key returns the key of the current item in the iterator.
+func (vi *VersionedIterator) Key() []byte {
+	// valid check
+	if !vi.Valid() {
+		return nil
+	}
+	// extract the actual key
+	actualKey, _, _, err := getVersionedKey(vi.iter.Key())
+	if err != nil {
+		return nil
+	}
+	// return the cleaned key without the prefix
+	return removePrefix(actualKey, vi.prefix)
+}
+
+// Value returns the value associated with the current key in the iterator.
+func (vi *VersionedIterator) Value() []byte {
+	// valid check
+	if !vi.Valid() {
+		return nil
+	}
+	// retrieve the value from the iterator
+	value := vi.iter.Value()
+	if value == nil {
+		return nil
+	}
+	// copy the value to return it safely
+	valueCopy := make([]byte, len(value))
+	copy(valueCopy, value)
+	return valueCopy
+}
+
+// Close closes the iterator and releases any resources it holds.
+func (vi *VersionedIterator) Close() {
+	vi.iter.Close()
 }
 
 // makeVersionedKey sets a composite key with the current version
@@ -226,91 +346,4 @@ func getVersionedKey(key []byte) (actualKey []byte, version uint64, tombstone bo
 	// extract the actual key part
 	actualKey = key[:versionIdx]
 	return actualKey, version, tombstone, nil
-}
-
-// Version returns the current version of the store.
-func (vs *VersionedStore) Version() uint64 {
-	return vs.version
-}
-
-// nextVersion returns the next version number for the store.
-func (vs *VersionedStore) nextVersion() uint64 {
-	return vs.version + 1
-}
-
-// validateKey performs basic validation on the key.
-func validateKey(key []byte) lib.ErrorI {
-	// sanity check for empty key
-	if len(key) == 0 {
-		return ErrInvalidKey()
-	}
-	// exit
-	return nil
-}
-
-// VersionedIterator CODE BELOW
-
-// VersionedIterator is an iterator that allows iterating over versioned keys in a Pebble database.
-type VersionedIterator struct {
-	iter    *pebble.Iterator
-	reverse bool
-	version uint64
-}
-
-// NewVersionedIterator creates a new VersionedIterator
-func NewVersionedIterator(iter *pebble.Iterator, reverse bool, version uint64) *VersionedIterator {
-	return &VersionedIterator{
-		iter:    iter,
-		reverse: reverse,
-		version: version,
-	}
-}
-
-func (vi *VersionedIterator) Valid() bool {
-	return vi.iter.Valid()
-}
-
-func (vi *VersionedIterator) Next() {
-	if !vi.Valid() {
-		return
-	}
-	vi.iter.Next()
-}
-
-func (vi *VersionedIterator) Prev() {
-	if !vi.Valid() {
-		return
-	}
-	vi.iter.Prev()
-}
-
-func (vi *VersionedIterator) Key() []byte {
-	if !vi.Valid() {
-		return nil
-	}
-	key := vi.iter.Key()
-	// extract the actual key, version, and tombstone marker
-	actualKey, _, _, err := getVersionedKey(key)
-	if err != nil {
-		return nil // or handle error appropriately
-	}
-	return actualKey
-}
-
-func (vi *VersionedIterator) Value() []byte {
-	if !vi.Valid() {
-		return nil
-	}
-	value := vi.iter.Value()
-	if value == nil {
-		return nil
-	}
-	// copy the value to return it safely
-	valueCopy := make([]byte, len(value))
-	copy(valueCopy, value)
-	return valueCopy
-}
-
-func (vi *VersionedIterator) Close() {
-	vi.iter.Close()
 }

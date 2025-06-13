@@ -508,4 +508,17 @@ func TestVersionedIteratorBasic(t *testing.T) {
 		value := iter.Value()
 		fmt.Printf("key: %s value %s \n", key, value)
 	}
+
+	fmt.Println("---- reverse ---")
+	// create a reverse iterator
+	revIter, err := vs.RevIterator(prefix)
+	require.NoError(t, err)
+	defer iter.Close()
+
+	// iterate through the keys
+	for ; revIter.Valid(); revIter.Next() {
+		key := revIter.Key()
+		value := revIter.Value()
+		fmt.Printf("key: %s value %s \n", key, value)
+	}
 }
