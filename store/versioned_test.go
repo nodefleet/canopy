@@ -490,7 +490,7 @@ func TestVersionedIteratorBasic(t *testing.T) {
 
 	prefix := []byte("p/")
 	version := uint64(1)
-	// db.Set(append([]byte("a"), makeVersionedKey([]byte("1"), version, false)...), []byte("1"), pebble.Sync)
+	db.Set(append([]byte("a"), makeVersionedKey([]byte("1"), version, false)...), []byte("1"), pebble.Sync)
 	db.Set(append(prefix, makeVersionedKey([]byte("1"), version, false)...), []byte("1"), pebble.Sync)
 	db.Set(append(prefix, makeVersionedKey([]byte("1"), version+1, false)...), []byte("2"), pebble.Sync)
 	db.Set(append(prefix, makeVersionedKey([]byte("1"), version+2, false)...), []byte("3"), pebble.Sync)
@@ -500,7 +500,7 @@ func TestVersionedIteratorBasic(t *testing.T) {
 	db.Set(append(prefix, makeVersionedKey([]byte("3"), version+1, true)...), []byte("2"), pebble.Sync)
 	db.Set(append(prefix, makeVersionedKey([]byte("3"), version+2, false)...), []byte("3"), pebble.Sync)
 	db.Set(append(prefix, makeVersionedKey([]byte("4"), version, false)...), []byte("1"), pebble.Sync)
-	// db.Set(append([]byte("z"), []byte("1")...), []byte("1"), pebble.Sync)
+	db.Set(append([]byte("z"), []byte("1")...), []byte("1"), pebble.Sync)
 	// initialize VersionedStore
 	vs := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 2, false)
 
@@ -511,6 +511,70 @@ func TestVersionedIteratorBasic(t *testing.T) {
 
 	// iterate through the keys
 	i := 0
+	for ; iter.Valid(); iter.Next() {
+		key := iter.Key()
+		value := iter.Value()
+		fmt.Printf("key: %s value %s \n", key, value)
+		i++
+		if i > 10 {
+			break
+		}
+	}
+	fmt.Println("---- prev ----")
+	iter.(*VersionedIterator).Prev()
+	for ; iter.Valid(); iter.(*VersionedIterator).Prev() {
+		key := iter.Key()
+		value := iter.Value()
+		fmt.Printf("key: %s value %s \n", key, value)
+		i++
+		if i > 10 {
+			break
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("---- reverse iterator ----")
+	fmt.Println()
+
+	// create an iterator
+	iter, err = vs.RevIterator(prefix)
+	require.NoError(t, err)
+	defer iter.Close()
+
+	// iterate through the keys
+	i = 0
+	for ; iter.Valid(); iter.Next() {
+		key := iter.Key()
+		value := iter.Value()
+		fmt.Printf("key: %s value %s \n", key, value)
+		i++
+		if i > 10 {
+			break
+		}
+	}
+	fmt.Println("---- prev ----")
+	iter.(*VersionedIterator).Prev()
+	for ; iter.Valid(); iter.(*VersionedIterator).Prev() {
+		key := iter.Key()
+		value := iter.Value()
+		fmt.Printf("key: %s value %s \n", key, value)
+		i++
+		if i > 10 {
+			break
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("---- archival iterator ----")
+	fmt.Println()
+
+	// create an iterator
+	iter, err = vs.ArchiveIterator(prefix)
+	require.NoError(t, err)
+	defer iter.Close()
+
+	// iterate through the keys
+	i = 0
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		value := iter.Value()
