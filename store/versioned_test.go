@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/canopy-network/canopy/lib"
-	"github.com/cockroachdb/pebble"
-	"github.com/cockroachdb/pebble/vfs"
+	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble/v2/vfs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -476,7 +476,8 @@ func BenchmarkGet(b *testing.B) {
 func newTestDb(t *testing.T) *pebble.DB {
 	db, err := pebble.Open("", &pebble.Options{
 		// Set options as needed for testing
-		FS: vfs.NewMem(),
+		FS:                 vfs.NewMem(),
+		FormatMajorVersion: pebble.FormatColumnarBlocks,
 	})
 	assert.NoError(t, err)
 	return db
@@ -488,14 +489,20 @@ func TestVersionedIteratorBasic(t *testing.T) {
 	defer db.Close()
 
 	prefix := []byte("p/")
-	db.Set(append([]byte("a"), []byte("1")...), []byte("1"), pebble.Sync)
-	db.Set(append(prefix, []byte("1")...), []byte("1"), pebble.Sync)
-	db.Set(append(prefix, []byte("2")...), []byte("2"), pebble.Sync)
-	db.Set(append(prefix, append([]byte("3"), TombstoneMarker)...), []byte("3"), pebble.Sync)
-	db.Set(append(prefix, []byte("4")...), []byte("4"), pebble.Sync)
-	db.Set(append([]byte("z"), []byte("1")...), []byte("1"), pebble.Sync)
+	version := uint64(1)
+	// db.Set(append([]byte("a"), makeVersionedKey([]byte("1"), version, false)...), []byte("1"), pebble.Sync)
+	db.Set(append(prefix, makeVersionedKey([]byte("1"), version, false)...), []byte("1"), pebble.Sync)
+	db.Set(append(prefix, makeVersionedKey([]byte("1"), version+1, false)...), []byte("2"), pebble.Sync)
+	db.Set(append(prefix, makeVersionedKey([]byte("1"), version+2, false)...), []byte("3"), pebble.Sync)
+	db.Set(append(prefix, makeVersionedKey([]byte("2"), version, false)...), []byte("1"), pebble.Sync)
+	db.Set(append(prefix, makeVersionedKey([]byte("2"), version+1, false)...), []byte("2"), pebble.Sync)
+	db.Set(append(prefix, makeVersionedKey([]byte("3"), version, false)...), []byte("1"), pebble.Sync)
+	db.Set(append(prefix, makeVersionedKey([]byte("3"), version+1, true)...), []byte("2"), pebble.Sync)
+	db.Set(append(prefix, makeVersionedKey([]byte("3"), version+2, false)...), []byte("3"), pebble.Sync)
+	db.Set(append(prefix, makeVersionedKey([]byte("4"), version, false)...), []byte("1"), pebble.Sync)
+	// db.Set(append([]byte("z"), []byte("1")...), []byte("1"), pebble.Sync)
 	// initialize VersionedStore
-	vs := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 1, false)
+	vs := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 2, false)
 
 	// create an iterator
 	iter, err := vs.Iterator(prefix)
@@ -503,22 +510,25 @@ func TestVersionedIteratorBasic(t *testing.T) {
 	defer iter.Close()
 
 	// iterate through the keys
+	i := 0
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		value := iter.Value()
 		fmt.Printf("key: %s value %s \n", key, value)
+		i++
+		if i > 10 {
+			break
+		}
 	}
-
-	fmt.Println("---- reverse ---")
-	// create a reverse iterator
-	revIter, err := vs.RevIterator(prefix)
-	require.NoError(t, err)
-	defer iter.Close()
-
-	// iterate through the keys
-	for ; revIter.Valid(); revIter.Next() {
-		key := revIter.Key()
-		value := revIter.Value()
+	fmt.Println("---- prev ----")
+	iter.(*VersionedIterator).Prev()
+	for ; iter.Valid(); iter.(*VersionedIterator).Prev() {
+		key := iter.Key()
+		value := iter.Value()
 		fmt.Printf("key: %s value %s \n", key, value)
+		i++
+		if i > 10 {
+			break
+		}
 	}
 }

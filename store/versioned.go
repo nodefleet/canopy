@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/canopy-network/canopy/lib"
-	"github.com/cockroachdb/pebble"
+	"github.com/cockroachdb/pebble/v2"
 )
 
 // enforce interface compliance
@@ -204,11 +204,7 @@ func (vs *VersionedStore) RevIterator(prefix []byte) (lib.IteratorI, lib.ErrorI)
 func (vs *VersionedStore) iterator(prefix []byte, reverse bool) (lib.IteratorI, lib.ErrorI) {
 	it, err := vs.reader.NewIter(&pebble.IterOptions{
 		LowerBound: prefix,
-		UpperBound: prefixEnd(prefix),
-		SkipPoint: func(userKey []byte) bool {
-			// skip tombstoned keys
-			return userKey[len(userKey)-1] == TombstoneMarker
-		},
+		UpperBound: endPrefix(prefix),
 	})
 	if err != nil {
 		return nil, ErrStoreIterator(err)
@@ -224,6 +220,7 @@ type VersionedIterator struct {
 	version uint64
 	prefix  []byte
 	reverse bool
+	started bool
 
 	next func() bool
 	prev func() bool
@@ -238,19 +235,23 @@ func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, 
 			iter:    iter,
 			reverse: true,
 			version: version,
+			prefix:  prefix,
 			next:    iter.Prev,
 			prev:    iter.Next,
 		}
 	}
 
-	iter.First()
-	return &VersionedIterator{
+	vi := &VersionedIterator{
 		iter:    iter,
 		reverse: reverse,
 		version: version,
+		prefix:  prefix,
 		next:    iter.Next,
 		prev:    iter.Prev,
 	}
+	iter.First()
+	vi.Next()
+	return vi
 }
 
 func (vi *VersionedIterator) Valid() bool {
@@ -259,22 +260,104 @@ func (vi *VersionedIterator) Valid() bool {
 
 // Next moves the iterator to the next item in the versioned key space.
 func (vi *VersionedIterator) Next() {
-	// valid check
-	if !vi.Valid() {
-		return
+	// only move to the next item if the iteration started
+	if vi.started {
+		if !vi.moveToNextLogicalKey() {
+			return
+		}
+	} else {
+		vi.started = true
 	}
-	// move to the next item
-	vi.next()
+	// iterately find the next logical key, skipping any tombstones
+	for {
+		// get the current key
+		key, _, _, err := getVersionedKey(vi.iter.Key())
+		if err != nil {
+			return
+		}
+		// append the next version than desired into the key
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, vi.version+1)
+		keyEnd := append(key, buf...)
+		// seek the key at the highest version lower than the version being iterated
+		if !vi.iter.SeekLT(keyEnd) {
+			return
+		}
+		// check if the current key is a tombstone
+		_, _, tombstone, err := getVersionedKey(vi.iter.Key())
+		if err != nil {
+			return
+		}
+		// key is valid
+		if !tombstone {
+			break
+		}
+		// otherwise, continue to the next item
+		if !vi.moveToNextLogicalKey() {
+			return
+		}
+	}
+}
+
+func (vi *VersionedIterator) moveToNextLogicalKey() bool {
+	// move the iterator to the next item in the versioned key space
+	key, _, _, err := getVersionedKey(vi.iter.Key())
+	if err != nil {
+		return false
+	}
+	return vi.iter.SeekGE(endPrefix(key))
 }
 
 // Prev moves the iterator to the previous item in the versioned key space.
 func (vi *VersionedIterator) Prev() {
-	// valid check
-	if !vi.Valid() {
-		return
+	// only move if iteration started
+	if vi.started {
+		if !vi.moveToPrevLogicalKey() {
+			return
+		}
+	} else {
+		vi.started = true
 	}
-	// move to the previous item
-	vi.prev()
+	// iteratively find the previous logical key, skipping tombstones
+	for {
+		// get the current key
+		key, _, _, err := getVersionedKey(vi.iter.Key())
+		if err != nil {
+			return
+		}
+		// append the version just above the current version
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, vi.version+1)
+		keyStart := append(key, buf...)
+		// seek to the highest version <= desired version (in reverse, use SeekLE)
+		// since we want the largest version <= vi.version, SeekLE(keyStart)
+		if !vi.iter.SeekLT(keyStart) {
+			return
+		}
+		// check if the current key is a tombstone
+		_, _, tombstone, err := getVersionedKey(vi.iter.Key())
+		if err != nil {
+			return
+		}
+		if !tombstone {
+			break
+		}
+		// otherwise, continue to the previous logical key
+		if !vi.moveToPrevLogicalKey() {
+			return
+		}
+	}
+}
+
+// moveToPrevLogicalKey moves the iterator to the previous logical key
+func (vi *VersionedIterator) moveToPrevLogicalKey() bool {
+	// get current logical key
+	key, _, _, err := getVersionedKey(vi.iter.Key())
+	if err != nil {
+		return false
+	}
+	// Seek to the key just lower than the current logical key
+	return vi.iter.SeekLT(key)
 }
 
 // Key returns the key of the current item in the iterator.
@@ -346,4 +429,18 @@ func getVersionedKey(key []byte) (actualKey []byte, version uint64, tombstone bo
 	// extract the actual key part
 	actualKey = key[:versionIdx]
 	return actualKey, version, tombstone, nil
+}
+
+// endPrefix constructs the end bound for a prefix by incrementing the last
+// byte less than 0xFF.
+func endPrefix(prefix []byte) []byte {
+	end := make([]byte, len(prefix))
+	copy(end, prefix)
+	for i := len(end) - 1; i >= 0; i-- {
+		if end[i] < 0xFF {
+			end[i]++
+			return end[:i+1]
+		}
+	}
+	return nil // can't construct bound
 }
