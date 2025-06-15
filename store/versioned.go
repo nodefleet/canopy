@@ -35,13 +35,18 @@ type VersionedStore struct {
 }
 
 // NewVersionedStore creates a new VersionedStore with the given database and initial version.
-func NewVersionedStore(reader *pebble.Snapshot, writer *pebble.Batch, version uint64, readUncommitted bool) *VersionedStore {
+func NewVersionedStore(reader *pebble.Snapshot, writer *pebble.Batch, version uint64, readUncommitted bool) (*VersionedStore, error) {
+	// minimum version is 1
+	if version == 0 {
+		return nil, ErrInvalidVersion()
+	}
+
 	return &VersionedStore{
 		reader:         reader,
 		writer:         writer,
 		version:        version,
 		readUncomitted: readUncommitted,
-	}
+	}, nil
 }
 
 func (vs *VersionedStore) Get(key []byte) (value []byte, err lib.ErrorI) {
@@ -247,8 +252,9 @@ func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, 
 		vi.nextFn = vi.prev
 		vi.prevFn = vi.next
 		iter.Last()
-		vi.Prev()
-
+		if !allVersions {
+			vi.Prev()
+		}
 		return vi
 	}
 
@@ -262,8 +268,9 @@ func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, 
 	vi.nextFn = vi.next
 	vi.prevFn = vi.prev
 	iter.First()
-	vi.Next()
-
+	if !allVersions {
+		vi.Next()
+	}
 	return vi
 }
 
@@ -325,7 +332,7 @@ func (vi *VersionedIterator) prev() bool {
 	}
 	// only move to the previous key if iteration started
 	if vi.started {
-		if !vi.moveToPrevLogicalKey() {
+		if !vi.moveToNextLogicalKey() {
 			return false
 		}
 	} else {
@@ -344,7 +351,7 @@ func (vi *VersionedIterator) prev() bool {
 			break
 		}
 		// otherwise, continue to the previous logical key
-		if !vi.moveToPrevLogicalKey() {
+		if !vi.moveToNextLogicalKey() {
 			return false
 		}
 	}
@@ -420,18 +427,10 @@ func (vi *VersionedIterator) moveToNextLogicalKey() bool {
 		return false
 	}
 	// seek to the key just after the current logical key
-	return vi.iter.SeekGE(endPrefix(key))
-}
-
-// moveToPrevLogicalKey moves the iterator to the previous logical key
-func (vi *VersionedIterator) moveToPrevLogicalKey() bool {
-	// get current logical key
-	key, _, _, err := getVersionedKey(vi.iter.Key())
-	if err != nil {
-		return false
+	if vi.reverse {
+		return vi.iter.SeekLT(key)
 	}
-	// seek to the key just lower than the current logical key
-	return vi.iter.SeekLT(key)
+	return vi.iter.SeekGE(endPrefix(key))
 }
 
 // makeVersionedKey sets a composite key with the current version

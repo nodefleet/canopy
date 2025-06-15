@@ -313,6 +313,7 @@ const (
 	CodeFlushMemTable          ErrorCode   = 15
 	CodeStoreIterator          ErrorCode   = 16
 	CodeStoreCommitted         ErrorCode   = 17
+	CodeInvalidVersion         ErrorCode   = 18
 
 	RPCModule             ErrorModule = "rpc"
 	CodeRPCTimeout        ErrorCode   = 1

@@ -70,6 +70,10 @@ func ErrStoreCommitted() lib.ErrorI {
 	return lib.NewError(lib.CodeStoreCommitted, lib.StorageModule, "attempted to write to a committed store")
 }
 
+func ErrInvalidVersion() lib.ErrorI {
+	return lib.NewError(lib.CodeInvalidVersion, lib.StorageModule, "version is invalid")
+}
+
 func ErrFlushMemTable(err error) lib.ErrorI {
 	return lib.NewError(lib.CodeFlushMemTable, lib.StorageModule, fmt.Sprintf("flush memtable failed with err: %s", err.Error()))
 }
