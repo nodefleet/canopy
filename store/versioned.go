@@ -29,9 +29,8 @@ type VersionedStore struct {
 	writer          *pebble.Batch
 	version         uint64
 	readUncommitted bool // whether to read keys that are not yet committed
-	// whether the writer has been committed. PebbleDB will panic if any
-	// operation is performed on a batch that has been committed. this prevents
-	// the panic to replace it with a more graceful error handling.
+	// whether the writer has been committed. Prevents PebbleDB panics on
+	// committed batches by returning an error instead.
 	committed atomic.Bool
 }
 
@@ -69,37 +68,36 @@ func (vs *VersionedStore) Get(key []byte) (value []byte, err lib.ErrorI) {
 	iterOpts := &pebble.IterOptions{
 		// lowest possible version (live)
 		LowerBound: makeVersionedKey(key, 0, false),
-		// highest possible version (tombstone), endBytes added as is not inclusive
-		UpperBound: lib.Append(makeVersionedKey(key, vs.Version(), true), endBytes),
+		// highest possible version with tombstone marker
+		UpperBound: makeVersionedKey(key, math.MaxUint64, true),
 	}
+	// create an iterator for the reader
 	iter, iterErr := vs.reader.NewIter(iterOpts)
 	if iterErr != nil {
 		return nil, ErrStoreGet(iterErr)
 	}
-	// ensure the iterator is closed after use
+	// ensure the iterator is closed when done
 	defer iter.Close()
-	// iterate through the keys to find the latest version or tombstone
-	for iter.Last(); iter.Valid(); iter.Prev() {
-		// retrieve the versioned key
-		iterKey, _, tombstone, err := getVersionedKey(iter.Key())
-		if err != nil || !bytes.Equal(key, iterKey) {
-			// if key cannot be parsed or doesn't match the requested key, skip it
-			continue
-		}
-		// we have a matching key
-		if !tombstone {
-			// if not a tombstone, get the value
-			value = iter.Value()
-		}
-		// in either case (tombstone or valid value), the key is found, break
-		break
+	// append the version just above the current version
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, vs.nextVersion())
+	// seek the key lower than the next version
+	if !iter.SeekLT(append(key, buf...)) {
+		// if no key is found, return nil
+		return nil, nil
 	}
-	// check if the iterator encountered an error
-	if iterErr := iter.Error(); iterErr != nil {
-		return nil, ErrStoreGet(iterErr)
+	foundKey, _, tombstone, getErr := getVersionedKey(iter.Key())
+	if getErr != nil || !bytes.Equal(key, foundKey) {
+		// if key cannot be parsed or doesn't match the requested key, skip it
+		return nil, nil
+	}
+	// check for tombstone marker
+	if tombstone {
+		return nil, nil
 	}
 	// exit
-	return value, err
+	return iter.Value(), nil
+
 }
 
 // Set stores a value for a key at the next version to the underlying batch, note that values are
@@ -113,7 +111,10 @@ func (vs *VersionedStore) Set(key, value []byte) lib.ErrorI {
 func (vs *VersionedStore) Delete(key []byte) lib.ErrorI {
 	// actual deletion of live key if any. This is to prevent both a live a tombstone marker
 	// existing at the same time
-	vs.writer.Delete(makeVersionedKey(key, vs.nextVersion(), false), nil)
+	err := vs.writer.Delete(makeVersionedKey(key, vs.nextVersion(), false), nil)
+	if err != nil {
+		return ErrStoreDelete(err)
+	}
 	// set the value to nil to mark as deleted (tombstoned)
 	return vs.set(key, nil, true)
 }
@@ -438,33 +439,12 @@ func (vi *VersionedIterator) moveToNextLogicalKey(forward bool) bool {
 		if forward {
 			return vi.iter.SeekLT(key)
 		}
-		return vi.nextKey()
+		return vi.iter.SeekGE(endPrefix(key))
 	}
 	if forward {
-		return vi.nextKey()
+		return vi.iter.SeekGE(endPrefix(key))
 	}
 	return vi.iter.SeekLT(key)
-}
-
-func (vi *VersionedIterator) nextKey() bool {
-	currentKey, _, _, err := getVersionedKey(vi.iter.Key())
-	if err != nil {
-		return false
-	}
-	valid := vi.iter.NextPrefix()
-	if !valid {
-		return false
-	}
-	newKey, _, _, err := getVersionedKey(vi.iter.Key())
-	if err != nil {
-		return false
-	}
-
-	if bytes.Equal(currentKey, newKey) {
-		return vi.iter.Next()
-	}
-
-	return true
 }
 
 // makeVersionedKey sets a composite key with the current version

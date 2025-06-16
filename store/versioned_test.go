@@ -628,7 +628,7 @@ func TestVersionedIterator(t *testing.T) {
 			},
 		},
 		{
-			name:    "don't get key readded in previous version",
+			name:    "don't get key readded in later version",
 			version: 9,
 			testData: []kvPair{
 				{[]byte("key1"), []byte("value1"), 1, false},
@@ -837,26 +837,10 @@ func TestVersionedIterator(t *testing.T) {
 			},
 			expected: []kvPair{},
 		},
-		// {
-		// 	name:    "keys with overlapping prefixes",
-		// 	version: 1,
-		// 	testData: []kvPair{
-		// 		{[]byte("prefix"), []byte("value1"), 1, false},
-		// 		{[]byte("prefix:key"), []byte("value2"), 1, false},
-		// 		{[]byte("prefix:key:sub"), []byte("value3"), 1, false},
-		// 		{[]byte("prefixa"), []byte("value4"), 1, false},
-		// 	},
-		// 	expected: []kvPair{
-		// 		{[]byte("prefix"), []byte("value1"), 1, false},
-		// 		{[]byte("prefix:key"), []byte("value2"), 1, false},
-		// 		{[]byte("prefix:key:sub"), []byte("value3"), 1, false},
-		// 		{[]byte("prefixa"), []byte("value4"), 1, false},
-		// 	},
-		// },
 		{
 			name:    "keys with overlapping prefixes",
 			version: 1,
-			prefix:  append([]byte("s/"), []byte{1}...),
+			prefix:  []byte("s/"),
 			testData: []kvPair{
 				{append([]byte("s/"), []byte{1, '1'}...), []byte("validator1"), 1, false},
 				{append([]byte("s/"), []byte{1, '1'}...), []byte("validator1v2"), 2, true},
@@ -864,13 +848,16 @@ func TestVersionedIterator(t *testing.T) {
 				{append([]byte("s/"), []byte{1, '3', '3'}...), []byte("validator3"), 1, false},
 				{append([]byte("s/"), []byte{1, '4', '0', '1'}...), []byte("validator3"), 1, false},
 				{append([]byte("s/"), []byte{1, '5'}...), []byte("validator3"), 1, false},
+				{append([]byte("s/"), []byte{2, '1'}...), []byte("account1"), 1, false},
+				{append([]byte("s/"), []byte{2, '1'}...), []byte("account1"), 2, true},
 			},
 			expected: []kvPair{
-				{[]byte{'1'}, []byte("validator1"), 1, false},
-				{[]byte{'2'}, []byte("validator2"), 1, false},
-				{[]byte{'3', '3'}, []byte("validator3"), 1, false},
-				{[]byte{'4', '0', '1'}, []byte("validator3"), 1, false},
-				{[]byte{'5'}, []byte("validator3"), 1, false},
+				{[]byte{1, '1'}, []byte("validator1"), 1, false},
+				{[]byte{1, '2'}, []byte("validator2"), 1, false},
+				{[]byte{1, '3', '3'}, []byte("validator3"), 1, false},
+				{[]byte{1, '4', '0', '1'}, []byte("validator3"), 1, false},
+				{[]byte{1, '5'}, []byte("validator3"), 1, false},
+				{[]byte{2, '1'}, []byte("account1"), 1, false},
 			},
 		},
 	}
@@ -902,12 +889,6 @@ func TestVersionedIterator(t *testing.T) {
 			// validate the iterator
 			i := 0
 			for ; iter.Valid(); iter.Next() {
-				// _, v, _, _ := getVersionedKey(iter.iter.Key())
-				// fmt.Println("---")
-				// fmt.Printf("[TEST] key:          %s value: %s version: %d\n", iter.Key(), iter.Value(), v)
-				// fmt.Printf("[TEST] expected key: %s value: %s\n", tt.expected[i].key, tt.expected[i].value)
-				// fmt.Println("---")
-
 				if i >= len(tt.expected) {
 					t.Fatalf("iterator returned more keys than expected")
 				}
@@ -916,7 +897,6 @@ func TestVersionedIterator(t *testing.T) {
 				i++
 			}
 			assert.Equal(t, len(tt.expected), i, "iterator returned fewer keys than expected")
-			// fmt.Println("---reverse-----")
 			// check reverse iteration
 			for {
 				iter.Prev()
@@ -924,11 +904,6 @@ func TestVersionedIterator(t *testing.T) {
 					break
 				}
 				i--
-				// _, v, _, _ := getVersionedKey(iter.iter.Key())
-				// fmt.Println("---")
-				// fmt.Printf("[TEST] key:          %s value: %s version: %d\n", iter.Key(), iter.Value(), v)
-				// fmt.Printf("[TEST] expected key: %s value: %s\n", tt.expected[i].key, tt.expected[i].value)
-				// fmt.Println("---")
 				assert.True(t, bytes.Equal(tt.expected[i].key, iter.Key()))
 				assert.True(t, bytes.Equal(tt.expected[i].value, iter.Value()))
 			}
