@@ -2,7 +2,6 @@ package store
 
 import (
 	"bytes"
-	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -30,6 +29,7 @@ func TestVersionedStoreGet(t *testing.T) {
 			key:           nil,
 			expectedValue: nil,
 			expectedError: ErrInvalidKey(),
+			version:       1,
 		},
 		{
 			name:          "key not found returns nil value",
@@ -37,6 +37,7 @@ func TestVersionedStoreGet(t *testing.T) {
 			key:           []byte("non-existent-key"),
 			expectedValue: nil,
 			expectedError: nil,
+			version:       1,
 		},
 		{
 			name: "fetch existing key",
@@ -50,6 +51,7 @@ func TestVersionedStoreGet(t *testing.T) {
 			key:           []byte("existing-key"),
 			expectedValue: []byte("value"),
 			expectedError: nil,
+			version:       1,
 		},
 		{
 			name: "tombstoned key returns nil value",
@@ -63,6 +65,7 @@ func TestVersionedStoreGet(t *testing.T) {
 			key:           []byte("tombstoned-key"),
 			expectedValue: nil,
 			expectedError: nil,
+			version:       1,
 		},
 		{
 			name: "fetch existing key at a lower version",
@@ -132,13 +135,14 @@ func TestVersionedStoreGet(t *testing.T) {
 			db := newTestDb(t)
 			defer db.Close()
 			// initialize VersionedStore
-			store := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version, false)
+			vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version, false)
+			require.NoError(t, err)
 			// apply the store state setup function
-			tt.storeState(t, store, db)
+			tt.storeState(t, vs, db)
 			// update the store snapshot to ensure access to the latest data
-			store.reader = db.NewSnapshot()
+			vs.reader = db.NewSnapshot()
 			// invoke the method being tested
-			result, err := store.Get(tt.key)
+			result, err := vs.Get(tt.key)
 			// assert results
 			if tt.expectedError != nil {
 				assert.NotNil(t, err)
@@ -170,6 +174,7 @@ func TestVersionedStoreSet(t *testing.T) {
 			key:           nil,
 			expectedValue: nil,
 			expectedError: ErrInvalidKey(),
+			version:       1,
 		},
 		{
 			name: "basic set operation",
@@ -179,6 +184,7 @@ func TestVersionedStoreSet(t *testing.T) {
 			key:           []byte("key"),
 			expectedValue: []byte("value"),
 			expectedError: nil,
+			version:       1,
 		},
 		{
 			name: "set empty value",
@@ -188,6 +194,7 @@ func TestVersionedStoreSet(t *testing.T) {
 			key:           []byte("key"),
 			expectedValue: nil,
 			expectedError: nil,
+			version:       1,
 		},
 		{
 			name: "update existing uncommitted key",
@@ -198,6 +205,7 @@ func TestVersionedStoreSet(t *testing.T) {
 			key:           []byte("key"),
 			expectedValue: []byte("new_value"),
 			expectedError: nil,
+			version:       1,
 		},
 		{
 			name: "set after commit",
@@ -209,6 +217,7 @@ func TestVersionedStoreSet(t *testing.T) {
 			key:           []byte("key"),
 			expectedValue: nil,
 			expectedError: ErrStoreCommitted(),
+			version:       1,
 		},
 		{
 			name: "cannot read uncommitted changes",
@@ -222,6 +231,7 @@ func TestVersionedStoreSet(t *testing.T) {
 			key:           []byte("key"),
 			expectedValue: []byte("value"),
 			expectedError: nil,
+			version:       1,
 		},
 	}
 
@@ -237,20 +247,22 @@ func TestVersionedStoreSet(t *testing.T) {
 			if tt.readUncommitted {
 				batch = db.NewIndexedBatch()
 			}
-			store := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			vs, err := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			require.NoError(t, err)
 			// apply the store state setup function
-			err := tt.operations(t, store)
+			err = tt.operations(t, vs)
 			if tt.expectedError != nil {
 				assert.NotNil(t, err)
 				assert.Equal(t, tt.expectedError, err)
 				return
 			}
 			// commit the store to persist changes
-			require.NoError(t, store.Commit())
+			require.NoError(t, vs.Commit())
 			// update the store snapshot to ensure access to the latest data
-			store = NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version+1, false)
+			vs, err = NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version+1, false)
+			require.NoError(t, err)
 			// get the latest value for the key
-			result, err := store.Get(tt.key)
+			result, err := vs.Get(tt.key)
 			// assert results
 			assert.Nil(t, err)
 			assert.True(t, bytes.Equal(tt.expectedValue, result))
@@ -275,6 +287,7 @@ func TestVersionedStoreDelete(t *testing.T) {
 				return vs.Delete(nil)
 			},
 			expectedError: ErrInvalidKey(),
+			version:       1,
 		},
 		{
 			name: "set then delete should return nil",
@@ -288,6 +301,7 @@ func TestVersionedStoreDelete(t *testing.T) {
 			expectedValue:   nil,
 			key:             []byte("key"),
 			readUncommitted: true,
+			version:         1,
 		},
 	}
 
@@ -303,20 +317,22 @@ func TestVersionedStoreDelete(t *testing.T) {
 			if tt.readUncommitted {
 				batch = db.NewIndexedBatch()
 			}
-			store := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			vs, err := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			require.NoError(t, err)
 			// apply the store state setup function
-			err := tt.operations(t, store)
+			err = tt.operations(t, vs)
 			if tt.expectedError != nil {
 				assert.NotNil(t, err)
 				assert.Equal(t, tt.expectedError, err)
 				return
 			}
 			// commit the store to persist changes
-			require.NoError(t, store.Commit())
+			require.NoError(t, vs.Commit())
 			// update the store snapshot to ensure access to the latest data
-			store = NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version+1, false)
+			vs, err = NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version+1, false)
+			require.NoError(t, err)
 			// get the latest value for the key
-			result, err := store.Get(tt.key)
+			result, err := vs.Get(tt.key)
 			// assert results
 			assert.Nil(t, err)
 			assert.True(t, bytes.Equal(tt.expectedValue, result))
@@ -394,7 +410,8 @@ func TestGetSetDeleteVersioned(t *testing.T) {
 	defer db.Close()
 	version := uint64(1)
 	// initialize VersionedStore
-	vs := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), version, false)
+	vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), version, false)
+	require.NoError(t, err)
 	// set a key
 	key := []byte("key")
 	require.NoError(t, vs.Set(key, []byte("value")))
@@ -406,7 +423,8 @@ func TestGetSetDeleteVersioned(t *testing.T) {
 	require.NoError(t, vs.Commit())
 	// update the store snapshot to ensure access to the latest data
 	version++
-	vs = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	vs, err = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	require.NoError(t, err)
 	// get the key when readUncommitted is true
 	value, err = vs.Get(key)
 	require.NoError(t, err)
@@ -423,18 +441,252 @@ func TestGetSetDeleteVersioned(t *testing.T) {
 	require.NoError(t, vs.Commit())
 	// update the store snapshot to ensure access to the latest data
 	version++
-	vs = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	vs, err = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	require.NoError(t, err)
 	// get the key after deletion
 	value, err = vs.Get(key)
 	require.NoError(t, err)
 	assert.True(t, bytes.Equal(value, nil))
 	// lower the store version
 	version--
-	vs = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	vs, err = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	require.NoError(t, err)
 	// get the key after deletion
 	value, err = vs.Get(key)
 	require.NoError(t, err)
 	assert.True(t, bytes.Equal(value, []byte("value")))
+}
+
+func TestVersionedIterator(t *testing.T) {
+	type kvPair struct {
+		key       []byte
+		value     []byte
+		version   uint64
+		tombstone bool
+	}
+	// helper to create a versioned iterator for testing
+	createIterator := func(t *testing.T, prefix []byte, vs *VersionedStore,
+		reverse, allVersions bool) *VersionedIterator {
+		if reverse {
+			vi, err := vs.RevIterator(prefix)
+			require.NoError(t, err)
+			return vi.(*VersionedIterator)
+		}
+		if allVersions {
+			vi, err := vs.ArchiveIterator(prefix)
+			require.NoError(t, err)
+			return vi.(*VersionedIterator)
+		}
+		vi, err := vs.Iterator(prefix)
+		require.NoError(t, err)
+		return vi.(*VersionedIterator)
+	}
+	// test cases
+	tests := []struct {
+		name        string
+		testData    []kvPair
+		prefix      string
+		version     uint64
+		reverse     bool
+		allVersions bool
+		setup       func(*testing.T, *pebble.DB)
+		expected    []kvPair
+	}{
+		{
+			name:    "forward iteration over multiple keys",
+			version: 1,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 1, false},
+				{[]byte("key3"), []byte("value3"), 1, false},
+			},
+			expected: []kvPair{
+				{key: []byte("key1"), value: []byte("value1")},
+				{key: []byte("key2"), value: []byte("value2")},
+				{key: []byte("key3"), value: []byte("value3")},
+			},
+		},
+		{
+			name:    "reverse iteration over multiple keys",
+			version: 1,
+			reverse: true,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 1, false},
+				{[]byte("key3"), []byte("value3"), 1, false},
+			},
+			expected: []kvPair{
+				{[]byte("key3"), []byte("value3"), 1, false},
+				{[]byte("key2"), []byte("value2"), 1, false},
+				{[]byte("key1"), []byte("value1"), 1, false},
+			},
+		},
+		{
+			name:    "iteration with prefix filtering",
+			prefix:  "prefix1:",
+			version: 1,
+			testData: []kvPair{
+				{[]byte("prefix1:key1"), []byte("value1"), 1, false},
+				{[]byte("prefix1:key2"), []byte("value2"), 1, false},
+				{[]byte("prefix2:key1"), []byte("value3"), 1, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 1, false},
+			},
+		},
+		{
+			name:        "archive iterates all versions",
+			version:     1,
+			allVersions: true,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value3"), 3, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value3"), 3, false},
+			},
+		},
+		{
+			name:    "get only keys with specific version",
+			version: 2,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+			},
+		},
+		{
+			name:    "skip tombstoned keys",
+			version: 2,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+				{[]byte("key3"), []byte("value2"), 2, true},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+			},
+		},
+		{
+			name:    "skip multiple tombstoned keys",
+			version: 2,
+			testData: []kvPair{
+				{[]byte("key0"), []byte("value0"), 2, true},
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+				{[]byte("key4"), []byte("value2"), 2, true},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+			},
+		},
+		{
+			name:    "reverse skip multiple tombstoned keys",
+			version: 2,
+			reverse: true,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value2"), 2, false},
+				{[]byte("key2"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+				{[]byte("key3"), []byte("value2"), 2, true},
+				{[]byte("key4"), []byte("value2"), 2, true},
+			},
+			expected: []kvPair{
+				{[]byte("key2"), []byte("value2"), 2, false},
+				{[]byte("key1"), []byte("value2"), 2, false},
+			},
+		},
+		{
+			name:    "get key readded in a later version",
+			version: 10,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value1"), 3, true},
+				{[]byte("key1"), []byte("value1"), 10, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+			},
+		},
+		{
+			name:    "don't get key readded in previous version",
+			version: 9,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value1"), 3, true},
+				{[]byte("key1"), []byte("value1"), 10, false},
+			},
+			expected: []kvPair{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// setup test database
+			db := newTestDb(t)
+			defer db.Close()
+			// set up test data
+			for _, v := range tt.testData {
+				// create versioned key and store in database
+				vk := makeVersionedKey(v.key, v.version, v.tombstone)
+				err := db.Set(vk, v.value, pebble.Sync)
+				if err != nil {
+					t.Fatalf("Failed to set up test data: %v", err)
+				}
+			}
+			// Run additional setup if provided
+			if tt.setup != nil {
+				tt.setup(t, db)
+			}
+			// setup versioned store
+			vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version, false)
+			require.NoError(t, err)
+			// create iterator
+			iter := createIterator(t, []byte(tt.prefix), vs, tt.reverse, tt.allVersions)
+			defer iter.Close()
+			// validate the iterator
+			i := 0
+			for ; iter.Valid(); iter.Next() {
+				if i >= len(tt.expected) {
+					t.Fatalf("iterator returned more keys than expected")
+				}
+				assert.True(t, bytes.Equal(tt.expected[i].key, iter.Key()))
+				assert.True(t, bytes.Equal(tt.expected[i].value, iter.Value()))
+				i++
+			}
+			assert.Equal(t, len(tt.expected), i, "iterator returned fewer keys than expected")
+			// check reverse iteration
+			for {
+				iter.Prev()
+				if !iter.Valid() {
+					break
+				}
+				i--
+				assert.True(t, bytes.Equal(tt.expected[i].key, iter.Key()))
+				assert.True(t, bytes.Equal(tt.expected[i].value, iter.Value()))
+			}
+			require.Equal(t, 0, i, "reverse iterator did not return to the start")
+		})
+	}
 }
 
 func BenchmarkGet(b *testing.B) {
@@ -443,8 +695,8 @@ func BenchmarkGet(b *testing.B) {
 	})
 	require.NoError(b, err)
 	defer db.Close()
-	vs := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 1, false)
-
+	vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 1, false)
+	require.NoError(b, err)
 	// amount of keys per version
 	version0 := 500
 	version1 := 500
@@ -481,118 +733,4 @@ func newTestDb(t *testing.T) *pebble.DB {
 	})
 	assert.NoError(t, err)
 	return db
-}
-
-func TestVersionedIteratorBasic(t *testing.T) {
-	// setup pebble DB
-	db := newTestDb(t)
-	defer db.Close()
-
-	prefix := []byte("p/")
-	version := uint64(1)
-	db.Set(append([]byte("a"), makeVersionedKey([]byte("1"), version, false)...), []byte("1"), pebble.Sync)
-	db.Set(append(prefix, makeVersionedKey([]byte("1"), version, false)...), []byte("1"), pebble.Sync)
-	db.Set(append(prefix, makeVersionedKey([]byte("1"), version+1, false)...), []byte("2"), pebble.Sync)
-	db.Set(append(prefix, makeVersionedKey([]byte("1"), version+2, false)...), []byte("3"), pebble.Sync)
-	db.Set(append(prefix, makeVersionedKey([]byte("2"), version, false)...), []byte("1"), pebble.Sync)
-	db.Set(append(prefix, makeVersionedKey([]byte("2"), version+1, false)...), []byte("2"), pebble.Sync)
-	db.Set(append(prefix, makeVersionedKey([]byte("3"), version, false)...), []byte("1"), pebble.Sync)
-	db.Set(append(prefix, makeVersionedKey([]byte("3"), version+1, true)...), []byte("2"), pebble.Sync)
-	db.Set(append(prefix, makeVersionedKey([]byte("3"), version+2, false)...), []byte("3"), pebble.Sync)
-	db.Set(append(prefix, makeVersionedKey([]byte("4"), version, false)...), []byte("1"), pebble.Sync)
-	db.Set(append([]byte("z"), []byte("1")...), []byte("1"), pebble.Sync)
-	// initialize VersionedStore
-	vs := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 2, false)
-
-	// create an iterator
-	iter, err := vs.Iterator(prefix)
-	require.NoError(t, err)
-	defer iter.Close()
-
-	// iterate through the keys
-	i := 0
-	for ; iter.Valid(); iter.Next() {
-		key := iter.Key()
-		value := iter.Value()
-		fmt.Printf("key: %s value %s \n", key, value)
-		i++
-		if i > 10 {
-			break
-		}
-	}
-	fmt.Println("---- prev ----")
-	iter.(*VersionedIterator).Prev()
-	for ; iter.Valid(); iter.(*VersionedIterator).Prev() {
-		key := iter.Key()
-		value := iter.Value()
-		fmt.Printf("key: %s value %s \n", key, value)
-		i++
-		if i > 10 {
-			break
-		}
-	}
-
-	fmt.Println()
-	fmt.Println("---- reverse iterator ----")
-	fmt.Println()
-
-	// create an iterator
-	iter, err = vs.RevIterator(prefix)
-	require.NoError(t, err)
-	defer iter.Close()
-
-	// iterate through the keys
-	i = 0
-	for ; iter.Valid(); iter.Next() {
-		key := iter.Key()
-		value := iter.Value()
-		fmt.Printf("key: %s value %s \n", key, value)
-		i++
-		if i > 10 {
-			break
-		}
-	}
-	fmt.Println("---- prev ----")
-	iter.(*VersionedIterator).Prev()
-	for ; iter.Valid(); iter.(*VersionedIterator).Prev() {
-		key := iter.Key()
-		value := iter.Value()
-		fmt.Printf("key: %s value %s \n", key, value)
-		i++
-		if i > 10 {
-			break
-		}
-	}
-
-	fmt.Println()
-	fmt.Println("---- archival iterator ----")
-	fmt.Println()
-
-	// create an iterator
-	iter, err = vs.ArchiveIterator(prefix)
-	require.NoError(t, err)
-	defer iter.Close()
-
-	// iterate through the keys
-	i = 0
-	for ; iter.Valid(); iter.Next() {
-		key := iter.Key()
-		value := iter.Value()
-		fmt.Printf("key: %s value %s \n", key, value)
-		i++
-		if i > 10 {
-			break
-		}
-	}
-	fmt.Println("---- prev ----")
-	iter.(*VersionedIterator).Prev()
-	for ; iter.Valid(); iter.(*VersionedIterator).Prev() {
-		key := iter.Key()
-		value := iter.Value()
-		fmt.Printf("key: %s value %s \n", key, value)
-		i++
-		if i > 10 {
-			break
-		}
-	}
 }

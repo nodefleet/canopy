@@ -233,31 +233,12 @@ type VersionedIterator struct {
 	reverse     bool
 	started     bool
 
-	nextFn func() bool
-	prevFn func() bool
+	nextFn func(bool) bool
+	prevFn func(bool) bool
 }
 
 // NewVersionedIterator creates a new VersionedIterator
 func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, reverse, allVersions bool) *VersionedIterator {
-	if reverse {
-		// set the next and prev functions for reverse iteration
-		vi := &VersionedIterator{
-			iter:        iter,
-			reverse:     reverse,
-			version:     version,
-			prefix:      prefix,
-			allVersions: allVersions,
-		}
-
-		vi.nextFn = vi.prev
-		vi.prevFn = vi.next
-		iter.Last()
-		if !allVersions {
-			vi.Prev()
-		}
-		return vi
-	}
-
 	vi := &VersionedIterator{
 		iter:        iter,
 		reverse:     reverse,
@@ -265,12 +246,21 @@ func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, 
 		prefix:      prefix,
 		allVersions: allVersions,
 	}
-	vi.nextFn = vi.next
-	vi.prevFn = vi.prev
-	iter.First()
+
+	if reverse {
+		vi.nextFn = vi.prev
+		vi.prevFn = vi.next
+		iter.Last()
+	} else {
+		vi.nextFn = vi.next
+		vi.prevFn = vi.prev
+		iter.First()
+	}
+
 	if !allVersions {
 		vi.Next()
 	}
+
 	return vi
 }
 
@@ -285,19 +275,19 @@ func (vi *VersionedIterator) Valid() bool {
 
 // Next moves the iterator to the next key in the versioned key space.
 func (vi *VersionedIterator) Next() {
-	vi.nextFn()
+	vi.nextFn(true)
 }
 
 // Next moves the iterator to the next key in the versioned key space.
 // Allows Next to be called directly without needing to check if the iterator is reverse or not.
-func (vi *VersionedIterator) next() bool {
+func (vi *VersionedIterator) next(forward bool) bool {
 	if vi.allVersions {
 		// seek to next versioned key
 		return vi.iter.Next()
 	}
 	// only move to the next key if the iteration started
 	if vi.started {
-		if !vi.moveToNextLogicalKey() {
+		if !vi.moveToNextLogicalKey(forward) {
 			return false
 		}
 	} else {
@@ -316,7 +306,7 @@ func (vi *VersionedIterator) next() bool {
 			break
 		}
 		// otherwise, continue to the next key
-		if !vi.moveToNextLogicalKey() {
+		if !vi.moveToNextLogicalKey(forward) {
 			return false
 		}
 	}
@@ -325,19 +315,19 @@ func (vi *VersionedIterator) next() bool {
 
 // Prev moves the iterator to the previous key in the versioned key space.
 func (vi *VersionedIterator) Prev() {
-	vi.prevFn()
+	vi.prevFn(false)
 }
 
 // prev is a helper that moves the iterator to the previous key in the versioned key space.
 // Allows Prev to be called directly without needing to check if the iterator is reverse or not.
-func (vi *VersionedIterator) prev() bool {
+func (vi *VersionedIterator) prev(forward bool) bool {
 	if vi.allVersions {
 		// seek to next versioned key
 		return vi.iter.Prev()
 	}
 	// only move to the previous key if iteration started
 	if vi.started {
-		if !vi.moveToNextLogicalKey() {
+		if !vi.moveToNextLogicalKey(forward) {
 			return false
 		}
 	} else {
@@ -356,7 +346,7 @@ func (vi *VersionedIterator) prev() bool {
 			break
 		}
 		// otherwise, continue to the previous logical key
-		if !vi.moveToNextLogicalKey() {
+		if !vi.moveToNextLogicalKey(forward) {
 			return false
 		}
 	}
@@ -425,7 +415,7 @@ func (vi *VersionedIterator) seekVersionedKey() (valid, tombstone bool) {
 }
 
 // moveToPrevLogicalKey moves the iterator to the next logical key
-func (vi *VersionedIterator) moveToNextLogicalKey() bool {
+func (vi *VersionedIterator) moveToNextLogicalKey(forward bool) bool {
 	// get current logical key
 	key, _, _, err := getVersionedKey(vi.iter.Key())
 	if err != nil {
@@ -433,9 +423,15 @@ func (vi *VersionedIterator) moveToNextLogicalKey() bool {
 	}
 	// seek to the key just after the current logical key
 	if vi.reverse {
-		return vi.iter.SeekLT(key)
+		if forward {
+			return vi.iter.SeekLT(key)
+		}
+		return vi.iter.SeekGE(endPrefix(key))
 	}
-	return vi.iter.SeekGE(endPrefix(key))
+	if forward {
+		return vi.iter.SeekGE(endPrefix(key))
+	}
+	return vi.iter.SeekLT(key)
 }
 
 // makeVersionedKey sets a composite key with the current version
