@@ -387,15 +387,14 @@ func TestKeyVersioning(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// create versioned store instance
 			// test round-trip: make versioned key and then extract the parts
 			versionedKey := makeVersionedKey(tt.key, tt.version, tt.tombstone)
 			// extract the original parts using getVersionedKey
 			extractedKey, extractedVersion, extractedTombstone, err := getVersionedKey(versionedKey)
-			// Verify no errors occurred
+			// verify no errors occurred
 			require.NoError(t, err)
 			// check that the extracted key matches the original
-			require.Equal(t, tt.key, extractedKey)
+			require.True(t, bytes.Equal(tt.key, extractedKey))
 			// check that the extracted version matches the original
 			require.Equal(t, tt.version, extractedVersion)
 			// check that the extracted tombstone flag matches the original
@@ -687,6 +686,53 @@ func TestVersionedIterator(t *testing.T) {
 			require.Equal(t, 0, i, "reverse iterator did not return to the start")
 		})
 	}
+}
+
+func FuzzKeyVersioning(f *testing.F) {
+	// seed corpus
+	tests := []struct {
+		key       []byte
+		version   uint64
+		tombstone bool
+	}{
+		// seed input and testing format comes from TestKeyVersioning
+		{
+			key:       []byte("testkey"),
+			version:   42,
+			tombstone: false,
+		},
+		{
+			key:       []byte{},
+			version:   100,
+			tombstone: false,
+		},
+		{
+			key:       []byte{0x01, 0x02, 0x03, 0x04},
+			version:   9999,
+			tombstone: true,
+		},
+		{
+			key:       []byte("maxversion"),
+			version:   math.MaxUint64,
+			tombstone: false,
+		},
+	}
+	for _, test := range tests {
+		f.Add(test.key, test.version, test.tombstone)
+	}
+	f.Fuzz(func(t *testing.T, key []byte, version uint64, tombstone bool) {
+		// test round-trip: make versioned key and then extract the parts
+		versionedKey := makeVersionedKey(key, version, tombstone)
+		extractedKey, extractedVersion, extractedTombstone, err := getVersionedKey(versionedKey)
+		// verify no errors occurred
+		require.NoError(t, err)
+		// check that the extracted key matches the original
+		require.True(t, bytes.Equal(key, extractedKey))
+		// check that the extracted version matches the original
+		require.Equal(t, version, extractedVersion)
+		// check that the extracted tombstone flag matches the original
+		require.Equal(t, tombstone, extractedTombstone)
+	})
 }
 
 func BenchmarkGet(b *testing.B) {
