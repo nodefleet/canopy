@@ -438,14 +438,33 @@ func (vi *VersionedIterator) moveToNextLogicalKey(forward bool) bool {
 		if forward {
 			return vi.iter.SeekLT(key)
 		}
-		return vi.iter.SeekGE(endPrefix(key))
-		// return vi.seekGT(endPrefix(key))
+		return vi.nextKey()
 	}
 	if forward {
-		return vi.iter.SeekGE(endPrefix(key))
-		// return vi.seekGT(endPrefix(key))
+		return vi.nextKey()
 	}
 	return vi.iter.SeekLT(key)
+}
+
+func (vi *VersionedIterator) nextKey() bool {
+	currentKey, _, _, err := getVersionedKey(vi.iter.Key())
+	if err != nil {
+		return false
+	}
+	valid := vi.iter.NextPrefix()
+	if !valid {
+		return false
+	}
+	newKey, _, _, err := getVersionedKey(vi.iter.Key())
+	if err != nil {
+		return false
+	}
+
+	if bytes.Equal(currentKey, newKey) {
+		return vi.iter.Next()
+	}
+
+	return true
 }
 
 // makeVersionedKey sets a composite key with the current version
