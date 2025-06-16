@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"math"
 	"sync/atomic"
 
 	"github.com/canopy-network/canopy/lib"
@@ -25,9 +26,9 @@ type VersionedStore struct {
 	reader *pebble.Snapshot
 	// writer is a Pebble batch that allows writing multiple operations atomically.
 	// an IndexedBatch is needed in order to read uncommitted keys
-	writer         *pebble.Batch
-	version        uint64
-	readUncomitted bool // whether to read keys that are not yet committed
+	writer          *pebble.Batch
+	version         uint64
+	readUncommitted bool // whether to read keys that are not yet committed
 	// whether the writer has been committed. PebbleDB will panic if any
 	// operation is performed on a batch that has been committed. this prevents
 	// the panic to replace it with a more graceful error handling.
@@ -36,16 +37,16 @@ type VersionedStore struct {
 
 // NewVersionedStore creates a new VersionedStore with the given database and initial version.
 func NewVersionedStore(reader *pebble.Snapshot, writer *pebble.Batch, version uint64, readUncommitted bool) (*VersionedStore, error) {
-	// minimum version is 1
-	if version == 0 {
+	// minimum version is 1 and maximum version is math.MaxUint64 - 1 due to lexicographical ordering
+	if version == 0 || version == math.MaxUint64 {
 		return nil, ErrInvalidVersion()
 	}
 
 	return &VersionedStore{
-		reader:         reader,
-		writer:         writer,
-		version:        version,
-		readUncomitted: readUncommitted,
+		reader:          reader,
+		writer:          writer,
+		version:         version,
+		readUncommitted: readUncommitted,
 	}, nil
 }
 
@@ -55,7 +56,7 @@ func (vs *VersionedStore) Get(key []byte) (value []byte, err lib.ErrorI) {
 		return nil, err
 	}
 	// if readCache is enabled, try to get the value from the writer first
-	if vs.readUncomitted {
+	if vs.readUncommitted {
 		// do not read from the writer if it has been committed
 		if !vs.committed.Load() {
 			value, err = vs.get(vs.writer, key, vs.nextVersion())
@@ -296,13 +297,13 @@ func (vi *VersionedIterator) next(forward bool) bool {
 	// iterately find the next logical key, skipping any tombstones
 	for {
 		// seek to the next versioned key
-		valid, tombstone := vi.seekVersionedKey()
+		valid, tombstone, version := vi.seekVersionedKey()
 		// valid check
 		if !valid {
 			return false
 		}
 		// valid key found, break
-		if !tombstone {
+		if !tombstone && version <= vi.version {
 			break
 		}
 		// otherwise, continue to the next key
@@ -336,13 +337,13 @@ func (vi *VersionedIterator) prev(forward bool) bool {
 	// iteratively find the previous logical key, skipping tombstones
 	for {
 		// seek to the previous versioned key
-		valid, tombstone := vi.seekVersionedKey()
+		valid, tombstone, version := vi.seekVersionedKey()
 		// valid check
 		if !valid {
 			return false
 		}
 		// valid key found, break
-		if !tombstone {
+		if !tombstone && version <= vi.version {
 			break
 		}
 		// otherwise, continue to the previous logical key
@@ -391,27 +392,33 @@ func (vi *VersionedIterator) Close() {
 }
 
 // seekVersionedKey seeks to the next versioned key in the iterator.
-func (vi *VersionedIterator) seekVersionedKey() (valid, tombstone bool) {
-	// get the current key
-	key, _, _, err := getVersionedKey(vi.iter.Key())
+func (vi *VersionedIterator) seekVersionedKey() (valid, tombstone bool, version uint64) {
+	// get the current currentKey
+	currentKey, currentVersion, _, err := getVersionedKey(vi.iter.Key())
 	if err != nil {
-		return false, false
+		return false, false, 0
+	}
+	// version check as the current key could be one with a version
+	// higher than the desired version
+	if currentVersion > vi.version {
+		return true, false, currentVersion
 	}
 	// append the version just above the current version
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, vi.version+1)
-	keyEnd := append(key, buf...)
+	keyEnd := append(currentKey, buf...)
 	// seek to the highest version <= desired version
 	if !vi.iter.SeekLT(keyEnd) {
-		return false, false
+		return false, false, 0
 	}
 	// check if the current key is a tombstone
-	_, _, tombstone, err = getVersionedKey(vi.iter.Key())
+	_, foundVersion, tombstone, err := getVersionedKey(vi.iter.Key())
+
 	if err != nil {
-		return false, false
+		return false, false, 0
 	}
 	// exit
-	return true, tombstone
+	return true, tombstone, foundVersion
 }
 
 // moveToPrevLogicalKey moves the iterator to the next logical key
