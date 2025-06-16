@@ -288,8 +288,15 @@ func (vi *VersionedIterator) next(forward bool) bool {
 	}
 	// only move to the next key if the iteration started
 	if vi.started {
-		if !vi.moveToNextLogicalKey(forward) {
-			return false
+		// move until a key with a valid version (lower or equal than the set version) is found
+		for {
+			if !vi.moveToNextLogicalKey(forward) {
+				return false
+			}
+			_, version, _, _ := getVersionedKey(vi.iter.Key())
+			if version <= vi.version {
+				break
+			}
 		}
 	} else {
 		vi.started = true
@@ -297,9 +304,14 @@ func (vi *VersionedIterator) next(forward bool) bool {
 	// iterately find the next logical key, skipping any tombstones
 	for {
 		// seek to the next versioned key
-		valid, tombstone, version := vi.seekVersionedKey()
+		valid := vi.seekVersionedKey()
 		// valid check
 		if !valid {
+			return false
+		}
+		// get seeked key
+		_, version, tombstone, err := getVersionedKey(vi.iter.Key())
+		if err != nil {
 			return false
 		}
 		// valid key found, break
@@ -337,9 +349,13 @@ func (vi *VersionedIterator) prev(forward bool) bool {
 	// iteratively find the previous logical key, skipping tombstones
 	for {
 		// seek to the previous versioned key
-		valid, tombstone, version := vi.seekVersionedKey()
+		valid := vi.seekVersionedKey()
 		// valid check
 		if !valid {
+			return false
+		}
+		_, version, tombstone, err := getVersionedKey(vi.iter.Key())
+		if err != nil {
 			return false
 		}
 		// valid key found, break
@@ -392,16 +408,11 @@ func (vi *VersionedIterator) Close() {
 }
 
 // seekVersionedKey seeks to the next versioned key in the iterator.
-func (vi *VersionedIterator) seekVersionedKey() (valid, tombstone bool, version uint64) {
+func (vi *VersionedIterator) seekVersionedKey() (valid bool) {
 	// get the current currentKey
-	currentKey, currentVersion, _, err := getVersionedKey(vi.iter.Key())
+	currentKey, _, _, err := getVersionedKey(vi.iter.Key())
 	if err != nil {
-		return false, false, 0
-	}
-	// version check as the current key could be one with a version
-	// higher than the desired version
-	if currentVersion > vi.version {
-		return true, false, currentVersion
+		return false
 	}
 	// append the version just above the current version
 	buf := make([]byte, 8)
@@ -409,16 +420,10 @@ func (vi *VersionedIterator) seekVersionedKey() (valid, tombstone bool, version 
 	keyEnd := append(currentKey, buf...)
 	// seek to the highest version <= desired version
 	if !vi.iter.SeekLT(keyEnd) {
-		return false, false, 0
-	}
-	// check if the current key is a tombstone
-	_, foundVersion, tombstone, err := getVersionedKey(vi.iter.Key())
-
-	if err != nil {
-		return false, false, 0
+		return false
 	}
 	// exit
-	return true, tombstone, foundVersion
+	return true
 }
 
 // moveToPrevLogicalKey moves the iterator to the next logical key
@@ -434,9 +439,11 @@ func (vi *VersionedIterator) moveToNextLogicalKey(forward bool) bool {
 			return vi.iter.SeekLT(key)
 		}
 		return vi.iter.SeekGE(endPrefix(key))
+		// return vi.seekGT(endPrefix(key))
 	}
 	if forward {
 		return vi.iter.SeekGE(endPrefix(key))
+		// return vi.seekGT(endPrefix(key))
 	}
 	return vi.iter.SeekLT(key)
 }
@@ -465,13 +472,16 @@ func getVersionedKey(key []byte) (actualKey []byte, version uint64, tombstone bo
 	if keyLen < VersionSize+1 {
 		return nil, 0, false, ErrInvalidKey()
 	}
+	// copy the key
+	copyKey := make([]byte, keyLen)
+	copy(copyKey, key)
 	tombstoneIdx := keyLen - 1
 	versionIdx := tombstoneIdx - VersionSize
 	// extract the version and tombstone marker from the key
-	version = binary.BigEndian.Uint64(key[versionIdx:tombstoneIdx])
-	tombstone = key[tombstoneIdx] == TombstoneMarker
+	version = binary.BigEndian.Uint64(copyKey[versionIdx:tombstoneIdx])
+	tombstone = copyKey[tombstoneIdx] == TombstoneMarker
 	// extract the actual key part
-	actualKey = key[:versionIdx]
+	actualKey = copyKey[:versionIdx]
 	return actualKey, version, tombstone, nil
 }
 

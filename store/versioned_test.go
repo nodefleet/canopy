@@ -484,7 +484,7 @@ func TestVersionedIterator(t *testing.T) {
 	tests := []struct {
 		name        string
 		testData    []kvPair
-		prefix      string
+		prefix      []byte
 		version     uint64
 		reverse     bool
 		allVersions bool
@@ -522,7 +522,7 @@ func TestVersionedIterator(t *testing.T) {
 		},
 		{
 			name:    "iteration with prefix filtering",
-			prefix:  "prefix1:",
+			prefix:  []byte("prefix1:"),
 			version: 1,
 			testData: []kvPair{
 				{[]byte("prefix1:key1"), []byte("value1"), 1, false},
@@ -637,7 +637,244 @@ func TestVersionedIterator(t *testing.T) {
 			},
 			expected: []kvPair{},
 		},
+		{
+			name:     "empty database returns no results",
+			version:  1,
+			testData: []kvPair{},
+			expected: []kvPair{},
+		},
+		{
+			name:    "single key with multiple versions shows latest only",
+			version: 10,
+			testData: []kvPair{
+				{[]byte("key"), []byte("value1"), 1, false},
+				{[]byte("key"), []byte("value5"), 5, false},
+				{[]byte("key"), []byte("value10"), 10, false},
+			},
+			expected: []kvPair{
+				{[]byte("key"), []byte("value10"), 10, false},
+			},
+		},
+		{
+			name:    "complex version history with interleaved tombstones",
+			version: 10,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("v1"), 1, false},
+				{[]byte("key1"), []byte("v3"), 3, false},
+				{[]byte("key1"), []byte("v5"), 5, true},  // tombstone
+				{[]byte("key1"), []byte("v7"), 7, false}, // readded
+				{[]byte("key1"), []byte("v9"), 9, true},  // tombstone again
+				{[]byte("key2"), []byte("v2"), 2, false},
+				{[]byte("key2"), []byte("v4"), 4, true},  // tombstone
+				{[]byte("key2"), []byte("v8"), 8, false}, // readded
+			},
+			expected: []kvPair{
+				{[]byte("key2"), []byte("v8"), 8, false},
+			},
+		},
+		{
+			name:    "keys with special characters and UTF-8",
+			version: 5,
+			testData: []kvPair{
+				{[]byte("key\x00with\x00nulls"), []byte("value1"), 1, false},
+				{[]byte("keyüñicode"), []byte("value2"), 2, false},
+				{[]byte("key-with-dashes"), []byte("value3"), 3, false},
+			},
+			expected: []kvPair{
+				{[]byte("key\x00with\x00nulls"), []byte("value1"), 1, false},
+				{[]byte("key-with-dashes"), []byte("value3"), 3, false},
+				{[]byte("keyüñicode"), []byte("value2"), 2, false},
+			},
+		},
+		{
+			name:    "version boundary conditions",
+			version: 2,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+				{[]byte("key3"), []byte("value3"), 3, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+			},
+		},
+		{
+			name:        "archive iterator with tombstones",
+			version:     5,
+			allVersions: true,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value2"), 2, true},
+				{[]byte("key1"), []byte("value3"), 3, false},
+				{[]byte("key2"), []byte("value4"), 4, false},
+				{[]byte("key2"), []byte("value5"), 5, true},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value2"), 2, true},
+				{[]byte("key1"), []byte("value3"), 3, false},
+				{[]byte("key2"), []byte("value4"), 4, false},
+				{[]byte("key2"), []byte("value5"), 5, true},
+			},
+		},
+		{
+			name:    "reverse iteration with prefix at version boundaries",
+			version: 5,
+			prefix:  []byte("prefix:"),
+			reverse: true,
+			testData: []kvPair{
+				{[]byte("prefix:key1"), []byte("value1"), 3, false},
+				{[]byte("prefix:key2"), []byte("value2"), 5, false},
+				{[]byte("prefix:key3"), []byte("value3"), 7, false},
+				{[]byte("otherprefix:key"), []byte("value4"), 4, false},
+			},
+			expected: []kvPair{
+				{[]byte("key2"), []byte("value2"), 5, false},
+				{[]byte("key1"), []byte("value1"), 3, false},
+			},
+		},
+		{
+			name:    "key reuse across different versions",
+			version: 10,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 2, false},
+				{[]byte("key1"), []byte("value3"), 3, true}, // tombstone key1
+				{[]byte("key3"), []byte("value4"), 4, false},
+				{[]byte("key1"), []byte("value5"), 5, false}, // reintroduce key1
+				{[]byte("key2"), []byte("value6"), 6, true},  // tombstone key2
+				{[]byte("key2"), []byte("value7"), 7, false}, // reintroduce key2
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value5"), 5, false},
+				{[]byte("key2"), []byte("value7"), 7, false},
+				{[]byte("key3"), []byte("value4"), 4, false},
+			},
+		},
+		{
+			name:    "handle large version gaps",
+			version: 10000,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 100, false},
+				{[]byte("key3"), []byte("value3"), 1000, false},
+				{[]byte("key4"), []byte("value4"), 10000, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key2"), []byte("value2"), 100, false},
+				{[]byte("key3"), []byte("value3"), 1000, false},
+				{[]byte("key4"), []byte("value4"), 10000, false},
+			},
+		},
+		{
+			name:    "zero-length key values",
+			version: 5,
+			testData: []kvPair{
+				{[]byte("key1"), []byte{}, 1, false},
+				{[]byte("key2"), []byte{}, 2, false},
+				{[]byte("key3"), []byte("value"), 3, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte{}, 1, false},
+				{[]byte("key2"), []byte{}, 2, false},
+				{[]byte("key3"), []byte("value"), 3, false},
+			},
+		},
+		{
+			name:    "only tombstones no valid keys",
+			version: 5,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, true},
+				{[]byte("key2"), []byte("value2"), 2, true},
+				{[]byte("key3"), []byte("value3"), 3, true},
+			},
+			expected: []kvPair{},
+		},
+		{
+			name:    "binary keys with various version patterns",
+			version: 5,
+			testData: []kvPair{
+				{[]byte{0x01, 0x02}, []byte("value1"), 1, false},
+				{[]byte{0x01, 0x03}, []byte("value2"), 2, false},
+				{[]byte{0x01, 0x02}, []byte("value3"), 3, true}, // tombstone earlier key
+				{[]byte{0x01, 0x04}, []byte("value4"), 4, false},
+			},
+			expected: []kvPair{
+				{[]byte{0x01, 0x03}, []byte("value2"), 2, false},
+				{[]byte{0x01, 0x04}, []byte("value4"), 4, false},
+			},
+		},
+		{
+			name:    "version lower than all stored versions",
+			version: 1,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 2, false},
+				{[]byte("key2"), []byte("value2"), 3, false},
+			},
+			expected: []kvPair{},
+		},
+		{
+			name:    "version exactly at boundary with multiple versions",
+			version: 5,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 4, false},
+				{[]byte("key1"), []byte("value2"), 5, false},
+				{[]byte("key1"), []byte("value3"), 6, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("value2"), 5, false},
+			},
+		},
+		{
+			name:    "version gaps with tombstones in between",
+			version: 100,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("value1"), 1, false},
+				{[]byte("key1"), []byte("value2"), 50, true},   // tombstone
+				{[]byte("key1"), []byte("value3"), 200, false}, // beyond version
+			},
+			expected: []kvPair{},
+		},
+		// {
+		// 	name:    "keys with overlapping prefixes",
+		// 	version: 1,
+		// 	testData: []kvPair{
+		// 		{[]byte("prefix"), []byte("value1"), 1, false},
+		// 		{[]byte("prefix:key"), []byte("value2"), 1, false},
+		// 		{[]byte("prefix:key:sub"), []byte("value3"), 1, false},
+		// 		{[]byte("prefixa"), []byte("value4"), 1, false},
+		// 	},
+		// 	expected: []kvPair{
+		// 		{[]byte("prefix"), []byte("value1"), 1, false},
+		// 		{[]byte("prefix:key"), []byte("value2"), 1, false},
+		// 		{[]byte("prefix:key:sub"), []byte("value3"), 1, false},
+		// 		{[]byte("prefixa"), []byte("value4"), 1, false},
+		// 	},
+		// },
+		{
+			name:    "keys with overlapping prefixes",
+			version: 1,
+			prefix:  append([]byte("s/"), []byte{1}...),
+			testData: []kvPair{
+				{append([]byte("s/"), []byte{1, '1'}...), []byte("validator1"), 1, false},
+				{append([]byte("s/"), []byte{1, '1'}...), []byte("validator1v2"), 2, true},
+				{append([]byte("s/"), []byte{1, '2'}...), []byte("validator2"), 1, false},
+				{append([]byte("s/"), []byte{1, '3', '3'}...), []byte("validator3"), 1, false},
+				{append([]byte("s/"), []byte{1, '4', '0', '1'}...), []byte("validator3"), 1, false},
+				{append([]byte("s/"), []byte{1, '5'}...), []byte("validator3"), 1, false},
+			},
+			expected: []kvPair{
+				{[]byte{'1'}, []byte("validator1"), 1, false},
+				{[]byte{'2'}, []byte("validator2"), 1, false},
+				{[]byte{'3', '3'}, []byte("validator3"), 1, false},
+				{[]byte{'4', '0', '1'}, []byte("validator3"), 1, false},
+				{[]byte{'5'}, []byte("validator3"), 1, false},
+			},
+		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// setup test database
@@ -665,6 +902,12 @@ func TestVersionedIterator(t *testing.T) {
 			// validate the iterator
 			i := 0
 			for ; iter.Valid(); iter.Next() {
+				// _, v, _, _ := getVersionedKey(iter.iter.Key())
+				// fmt.Println("---")
+				// fmt.Printf("[TEST] key:          %s value: %s version: %d\n", iter.Key(), iter.Value(), v)
+				// fmt.Printf("[TEST] expected key: %s value: %s\n", tt.expected[i].key, tt.expected[i].value)
+				// fmt.Println("---")
+
 				if i >= len(tt.expected) {
 					t.Fatalf("iterator returned more keys than expected")
 				}
@@ -673,6 +916,7 @@ func TestVersionedIterator(t *testing.T) {
 				i++
 			}
 			assert.Equal(t, len(tt.expected), i, "iterator returned fewer keys than expected")
+			// fmt.Println("---reverse-----")
 			// check reverse iteration
 			for {
 				iter.Prev()
@@ -680,6 +924,11 @@ func TestVersionedIterator(t *testing.T) {
 					break
 				}
 				i--
+				// _, v, _, _ := getVersionedKey(iter.iter.Key())
+				// fmt.Println("---")
+				// fmt.Printf("[TEST] key:          %s value: %s version: %d\n", iter.Key(), iter.Value(), v)
+				// fmt.Printf("[TEST] expected key: %s value: %s\n", tt.expected[i].key, tt.expected[i].value)
+				// fmt.Println("---")
 				assert.True(t, bytes.Equal(tt.expected[i].key, iter.Key()))
 				assert.True(t, bytes.Equal(tt.expected[i].value, iter.Value()))
 			}
