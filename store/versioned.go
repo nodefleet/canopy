@@ -275,7 +275,12 @@ func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, 
 }
 
 func (vi *VersionedIterator) Valid() bool {
-	return vi.iter.Valid()
+	valid := vi.iter.Valid()
+	if !valid {
+		// reset iteration state
+		vi.started = false
+	}
+	return valid
 }
 
 // Next moves the iterator to the next key in the versioned key space.
