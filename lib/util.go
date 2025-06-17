@@ -2,6 +2,7 @@ package lib
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -785,4 +786,11 @@ func ContainsByteSlice(list [][]byte, target []byte) (found bool) {
 		}
 	}
 	return
+}
+
+func BytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare(a, b) == 1
 }

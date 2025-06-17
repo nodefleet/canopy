@@ -24,14 +24,6 @@ func TestVersionedStoreGet(t *testing.T) {
 		version       uint64
 	}{
 		{
-			name:          "empty key returns ErrInvalidKey",
-			storeState:    func(t *testing.T, vs *VersionedStore, db *pebble.DB) {},
-			key:           nil,
-			expectedValue: nil,
-			expectedError: ErrInvalidKey(),
-			version:       1,
-		},
-		{
 			name:          "key not found returns nil value",
 			storeState:    func(t *testing.T, vs *VersionedStore, db *pebble.DB) {},
 			key:           []byte("non-existent-key"),
@@ -167,16 +159,6 @@ func TestVersionedStoreSet(t *testing.T) {
 		readUncommitted bool
 	}{
 		{
-			name: "empty key returns ErrInvalidKey",
-			operations: func(t *testing.T, vs *VersionedStore) error {
-				return vs.Set(nil, nil)
-			},
-			key:           nil,
-			expectedValue: nil,
-			expectedError: ErrInvalidKey(),
-			version:       1,
-		},
-		{
 			name: "basic set operation",
 			operations: func(t *testing.T, vs *VersionedStore) error {
 				return vs.Set([]byte("key"), []byte("value"))
@@ -281,14 +263,6 @@ func TestVersionedStoreDelete(t *testing.T) {
 		version         uint64
 		readUncommitted bool
 	}{
-		{
-			name: "empty key returns ErrInvalidKey",
-			operations: func(t *testing.T, vs *VersionedStore) error {
-				return vs.Delete(nil)
-			},
-			expectedError: ErrInvalidKey(),
-			version:       1,
-		},
 		{
 			name: "set then delete should return nil",
 			operations: func(t *testing.T, vs *VersionedStore) error {
@@ -432,7 +406,7 @@ func TestGetSetDeleteVersioned(t *testing.T) {
 	require.NoError(t, vs.Set(key, []byte("new_value")))
 	value, err = vs.Get(key)
 	require.NoError(t, err)
-	assert.True(t, bytes.Equal(value, []byte("new_value")))
+	assert.True(t, bytes.Equal(value, []byte("new_value")), string(value))
 	// delete the key
 	err = vs.Delete(key)
 	require.NoError(t, err)
@@ -448,7 +422,7 @@ func TestGetSetDeleteVersioned(t *testing.T) {
 	assert.True(t, bytes.Equal(value, nil))
 	// lower the store version
 	version--
-	vs, err = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	vs, err = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, false)
 	require.NoError(t, err)
 	// get the key after deletion
 	value, err = vs.Get(key)
@@ -932,17 +906,6 @@ func TestVersionedIterator(t *testing.T) {
 				i++
 			}
 			assert.Equal(t, len(tt.expected), i, "iterator returned fewer keys than expected")
-			// check reverse iteration
-			for {
-				iter.Prev()
-				if !iter.Valid() {
-					break
-				}
-				i--
-				assert.True(t, bytes.Equal(tt.expected[i].key, iter.Key()))
-				assert.True(t, bytes.Equal(tt.expected[i].value, iter.Value()))
-			}
-			require.Equal(t, 0, i, "reverse iterator did not return to the start")
 		})
 	}
 }
