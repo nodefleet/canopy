@@ -242,8 +242,7 @@ func (vi *VersionedIterator) Key() []byte {
 	if err != nil {
 		return nil
 	}
-	// return clean key without the prefix
-	return removePrefix(actualKey, vi.prefix)
+	return actualKey
 }
 
 // Value returns the value associated with the current key in the iterator.

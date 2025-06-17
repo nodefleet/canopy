@@ -503,8 +503,8 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("prefix2:key1"), []byte("value3"), 1, false},
 			},
 			expected: []kvPair{
-				{[]byte("key1"), []byte("value1"), 1, false},
-				{[]byte("key2"), []byte("value2"), 1, false},
+				{[]byte("prefix1:key1"), []byte("value1"), 1, false},
+				{[]byte("prefix1:key2"), []byte("value2"), 1, false},
 			},
 		},
 		{
@@ -703,8 +703,8 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("otherprefix:key"), []byte("value4"), 4, false},
 			},
 			expected: []kvPair{
-				{[]byte("key2"), []byte("value2"), 5, false},
-				{[]byte("key1"), []byte("value1"), 3, false},
+				{[]byte("prefix:key2"), []byte("value2"), 5, false},
+				{[]byte("prefix:key1"), []byte("value1"), 3, false},
 			},
 		},
 		{
@@ -825,12 +825,12 @@ func TestVersionedIterator(t *testing.T) {
 				{append([]byte("s/"), []byte{2, '1'}...), []byte("account1"), 2, true},
 			},
 			expected: []kvPair{
-				{[]byte{1, '1'}, []byte("validator1"), 1, false},
-				{[]byte{1, '2'}, []byte("validator2"), 1, false},
-				{[]byte{1, '3', '3'}, []byte("validator3"), 1, false},
-				{[]byte{1, '4', '0', '1'}, []byte("validator3"), 1, false},
-				{[]byte{1, '5'}, []byte("validator3"), 1, false},
-				{[]byte{2, '1'}, []byte("account1"), 1, false},
+				{append([]byte("s/"), []byte{1, '1'}...), []byte("validator1"), 1, false},
+				{append([]byte("s/"), []byte{1, '2'}...), []byte("validator2"), 1, false},
+				{append([]byte("s/"), []byte{1, '3', '3'}...), []byte("validator3"), 1, false},
+				{append([]byte("s/"), []byte{1, '4', '0', '1'}...), []byte("validator3"), 1, false},
+				{append([]byte("s/"), []byte{1, '5'}...), []byte("validator3"), 1, false},
+				{append([]byte("s/"), []byte{2, '1'}...), []byte("account1"), 1, false},
 			},
 		},
 		{
@@ -849,12 +849,12 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("other:key"), []byte("v7"), 7, false},
 			},
 			expected: []kvPair{
-				{[]byte("key1"), []byte("v1"), 1, false},
-				{[]byte("key1"), []byte("v3"), 3, true},
-				{[]byte("key1"), []byte("v5"), 5, false},
-				{[]byte("key2"), []byte("v2"), 2, false},
-				{[]byte("key2"), []byte("v4"), 4, true},
-				{[]byte("key2"), []byte("v6"), 6, false},
+				{[]byte("test:key1"), []byte("v1"), 1, false},
+				{[]byte("test:key1"), []byte("v3"), 3, true},
+				{[]byte("test:key1"), []byte("v5"), 5, false},
+				{[]byte("test:key2"), []byte("v2"), 2, false},
+				{[]byte("test:key2"), []byte("v4"), 4, true},
+				{[]byte("test:key2"), []byte("v6"), 6, false},
 			},
 		},
 		{
