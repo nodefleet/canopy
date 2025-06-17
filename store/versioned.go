@@ -106,10 +106,6 @@ func (vs *VersionedStore) getFromWriter(key []byte) ([]byte, lib.ErrorI) {
 
 // get retrieves the value for a key at a specific version
 func (vs *VersionedStore) get(reader pebble.Reader, key []byte, version uint64) ([]byte, lib.ErrorI) {
-	// perform basic validation on the key
-	if err := validateKey(key); err != nil {
-		return nil, err
-	}
 	// create a composite key with the current version and no tombstone marker
 	versionedKey := makeVersionedKey(key, version, false)
 	// retrieve the value from the database
@@ -117,19 +113,16 @@ func (vs *VersionedStore) get(reader pebble.Reader, key []byte, version uint64) 
 	// if the key is found, return the value
 	if err != nil {
 		// check for errors not related to key not found
-		if !errors.Is(err, pebble.ErrNotFound) {
-			return nil, ErrStoreGet(err)
+		if errors.Is(err, pebble.ErrNotFound) {
+			return nil, nil
 		}
-		// key not found, return nil
-		return nil, nil
+		// otherwise, return the error
+		return nil, ErrStoreGet(err)
 	}
 	// ensure the closer is closed to release resources
 	defer closer.Close()
-	// copy the value before returning (since the original may get overwritten)
-	valueCopy := make([]byte, len(value))
-	copy(valueCopy, value)
 	// exit
-	return valueCopy, nil
+	return bytes.Clone(value), nil
 }
 
 // getFromReader look for the existing key at a lower version or with a tombstone marker
@@ -152,12 +145,8 @@ func (vs *VersionedStore) getFromReader(key []byte) ([]byte, lib.ErrorI) {
 		return nil, nil
 	}
 	foundKey, _, tombstone, getErr := getVersionedKey(iter.Key())
-	if getErr != nil || !bytes.Equal(key, foundKey) {
-		// if key cannot be parsed or doesn't match the requested key, skip it
-		return nil, nil
-	}
-	// check for tombstone marker
-	if tombstone {
+	// check for valid key
+	if getErr != nil || !bytes.Equal(key, foundKey) || tombstone {
 		return nil, nil
 	}
 	// exit
@@ -349,9 +338,7 @@ func (vi *VersionedIterator) prev(forward bool) bool {
 	// iteratively find the previous logical key, skipping tombstones
 	for {
 		// seek to the previous versioned key
-		valid := vi.seekVersionedKey()
-		// valid check
-		if !valid {
+		if !vi.seekVersionedKey() {
 			return false
 		}
 		_, version, tombstone, err := getVersionedKey(vi.iter.Key())
@@ -367,7 +354,7 @@ func (vi *VersionedIterator) prev(forward bool) bool {
 			return false
 		}
 	}
-	return true
+	return false
 }
 
 // Key returns the key of the current key in the iterator.

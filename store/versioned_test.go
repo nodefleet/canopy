@@ -488,7 +488,6 @@ func TestVersionedIterator(t *testing.T) {
 		version     uint64
 		reverse     bool
 		allVersions bool
-		setup       func(*testing.T, *pebble.DB)
 		expected    []kvPair
 	}{
 		{
@@ -860,6 +859,46 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte{2, '1'}, []byte("account1"), 1, false},
 			},
 		},
+		{
+			name:        "archive iterator with prefix and tombstones",
+			prefix:      []byte("test:"),
+			version:     10,
+			allVersions: true,
+			testData: []kvPair{
+				{[]byte("test:key1"), []byte("v1"), 1, false},
+				{[]byte("test:key1"), []byte("v3"), 3, true},
+				{[]byte("test:key1"), []byte("v5"), 5, false},
+				{[]byte("test:key2"), []byte("v2"), 2, false},
+				{[]byte("test:key2"), []byte("v4"), 4, true},
+				{[]byte("test:key2"), []byte("v6"), 6, false},
+				// should be filtered out
+				{[]byte("other:key"), []byte("v7"), 7, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("v1"), 1, false},
+				{[]byte("key1"), []byte("v3"), 3, true},
+				{[]byte("key1"), []byte("v5"), 5, false},
+				{[]byte("key2"), []byte("v2"), 2, false},
+				{[]byte("key2"), []byte("v4"), 4, true},
+				{[]byte("key2"), []byte("v6"), 6, false},
+			},
+		},
+		{
+			name:    "alternating live tombstone pattern",
+			version: 20,
+			testData: []kvPair{
+				{[]byte("key1"), []byte("v1"), 1, false},
+				{[]byte("key1"), []byte("v2"), 2, true},
+				{[]byte("key1"), []byte("v3"), 3, false},
+				{[]byte("key1"), []byte("v4"), 4, true},
+				{[]byte("key1"), []byte("v5"), 5, false},
+				{[]byte("key1"), []byte("v6"), 6, true},
+				{[]byte("key1"), []byte("v7"), 7, false},
+			},
+			expected: []kvPair{
+				{[]byte("key1"), []byte("v7"), 7, false},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -875,10 +914,6 @@ func TestVersionedIterator(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to set up test data: %v", err)
 				}
-			}
-			// Run additional setup if provided
-			if tt.setup != nil {
-				tt.setup(t, db)
 			}
 			// setup versioned store
 			vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version, false)
@@ -995,9 +1030,9 @@ func BenchmarkGet(b *testing.B) {
 	}
 }
 
+// newTestDb creates a new pebble in memory database
 func newTestDb(t *testing.T) *pebble.DB {
 	db, err := pebble.Open("", &pebble.Options{
-		// Set options as needed for testing
 		FS:                 vfs.NewMem(),
 		FormatMajorVersion: pebble.FormatColumnarBlocks,
 	})
