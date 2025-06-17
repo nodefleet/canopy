@@ -99,7 +99,7 @@ func (vs *VersionedStore) get(key []byte, reader pebble.Reader, version uint64) 
 		return
 	}
 	// the key isn't expected
-	if !bytes.Equal(key, logicalKey) {
+	if !lib.BytesEqual(key, logicalKey) {
 		return
 	}
 	// exit
@@ -294,7 +294,7 @@ func (vi *VersionedIterator) seekNextValidKey() bool {
 			return false
 		}
 		seekedKey, version, tombstone, err := getVersionedKey(vi.iter.Key())
-		// the iterator is invalid if forward and
+		// the iterator is invalid if forward and the seeked key is different than the start key
 		if err != nil || (!vi.reverse && !lib.BytesEqual(seekedKey, startKey)) {
 			return false
 		}
