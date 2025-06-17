@@ -92,6 +92,27 @@ func (vs *VersionedStore) Delete(key []byte) lib.ErrorI {
 	return vs.set(key, nil, true)
 }
 
+// Commit commits the underlying batch to the database, making all changes visible.
+func (vs *VersionedStore) Commit() lib.ErrorI {
+	// check if the store is already committed
+	if vs.committed.Load() {
+		return ErrStoreCommitted()
+	}
+	// commit the underlying batch
+	if err := vs.writer.Commit(pebble.Sync); err != nil {
+		return ErrCommitDB(err)
+	}
+	// mark the store as committed
+	vs.committed.Store(true)
+	return nil
+}
+
+// Version returns the current version of the store.
+func (vs *VersionedStore) Version() uint64 {
+	return vs.version
+}
+
+// set sets the value for a key at the next version
 func (vs *VersionedStore) set(key []byte, value []byte, tombstone bool) lib.ErrorI {
 	// check if the store is already committed
 	if vs.committed.Load() {
@@ -110,6 +131,7 @@ func (vs *VersionedStore) set(key []byte, value []byte, tombstone bool) lib.Erro
 	return nil
 }
 
+// getFromWriter retrieves the value for a key at the next version from the writer
 func (vs *VersionedStore) getFromWriter(key []byte) ([]byte, lib.ErrorI) {
 	return vs.get(vs.writer, key, vs.nextVersion())
 }
@@ -163,26 +185,6 @@ func (vs *VersionedStore) getFromReader(key []byte) ([]byte, lib.ErrorI) {
 	return iter.Value(), nil
 }
 
-// Commit commits the underlying batch to the database, making all changes visible.
-func (vs *VersionedStore) Commit() lib.ErrorI {
-	// check if the store is already committed
-	if vs.committed.Load() {
-		return ErrStoreCommitted()
-	}
-	// commit the underlying batch
-	if err := vs.writer.Commit(pebble.Sync); err != nil {
-		return ErrCommitDB(err)
-	}
-	// mark the store as committed
-	vs.committed.Store(true)
-	return nil
-}
-
-// Version returns the current version of the store.
-func (vs *VersionedStore) Version() uint64 {
-	return vs.version
-}
-
 // nextVersion returns the next version number for the store.
 func (vs *VersionedStore) nextVersion() uint64 {
 	if vs.version == math.MaxUint64 {
@@ -201,14 +203,17 @@ func validateKey(key []byte) lib.ErrorI {
 	return nil
 }
 
+// Iterator creates a new iterator that iterates over all the keys in the store up to the current version.
 func (vs *VersionedStore) Iterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
 	return vs.iterator(prefix, false, false)
 }
 
+// RevIterator creates a new iterator that iterates over all versions of keys in the store in reverse order.
 func (vs *VersionedStore) RevIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
 	return vs.iterator(prefix, true, false)
 }
 
+// ArchiveIterator creates a new iterator that iterates over all versions of keys in the store.
 func (vs *VersionedStore) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
 	return vs.iterator(prefix, false, true)
 }
@@ -234,7 +239,7 @@ type VersionedIterator struct {
 	allVersions bool
 	prefix      []byte
 	reverse     bool
-	started     bool
+	valid       bool
 
 	nextFn func(bool) bool
 	prevFn func(bool) bool
@@ -274,7 +279,7 @@ func (vi *VersionedIterator) Valid() bool {
 	valid := vi.iter.Valid()
 	if !valid {
 		// reset iteration state
-		vi.started = false
+		vi.valid = false
 	}
 	return valid
 }
@@ -291,8 +296,8 @@ func (vi *VersionedIterator) next(forward bool) bool {
 		// seek to next versioned key
 		return vi.iter.Next()
 	}
-	// only move to the next key if the iteration started
-	if vi.started {
+	// only move to the next key if the iteration is valid
+	if vi.valid {
 		// move until a key with a valid version (lower or equal than the set version) is found
 		for {
 			if !vi.moveToNextLogicalKey(forward) {
@@ -307,31 +312,10 @@ func (vi *VersionedIterator) next(forward bool) bool {
 			}
 		}
 	} else {
-		vi.started = true
+		vi.valid = true
 	}
-	// iterately find the next logical key, skipping any tombstones
-	for {
-		// seek to the next versioned key
-		valid := vi.seekVersionedKey()
-		// valid check
-		if !valid {
-			return false
-		}
-		// get seeked key
-		_, version, tombstone, err := getVersionedKey(vi.iter.Key())
-		if err != nil {
-			return false
-		}
-		// valid key found, break
-		if !tombstone && version <= vi.version {
-			break
-		}
-		// otherwise, continue to the next key
-		if !vi.moveToNextLogicalKey(forward) {
-			return false
-		}
-	}
-	return true
+	// find the next valid key, skipping any tombstones
+	return vi.seekNextValidKey(forward)
 }
 
 // Prev moves the iterator to the previous key in the versioned key space.
@@ -346,48 +330,26 @@ func (vi *VersionedIterator) prev(forward bool) bool {
 		// seek to next versioned key
 		return vi.iter.Prev()
 	}
-	// only move to the previous key if iteration started
-	if vi.started {
+	// only move to the previous key if iteration is valid
+	if vi.valid {
 		if !vi.moveToNextLogicalKey(forward) {
 			return false
 		}
 	} else {
-		vi.started = true
+		vi.valid = true
 	}
-	// iteratively find the previous logical key, skipping tombstones
-	for {
-		// seek to the previous versioned key
-		if !vi.seekVersionedKey() {
-			return false
-		}
-		_, version, tombstone, err := getVersionedKey(vi.iter.Key())
-		if err != nil {
-			return false
-		}
-		// valid key found, break
-		if !tombstone && version <= vi.version {
-			break
-		}
-		// otherwise, continue to the previous logical key
-		if !vi.moveToNextLogicalKey(forward) {
-			return false
-		}
-	}
-	return true
+	// seek the next valid key, skipping any tombstones
+	return vi.seekNextValidKey(forward)
 }
 
 // Key returns the key of the current key in the iterator.
 func (vi *VersionedIterator) Key() []byte {
-	// valid check
-	if !vi.Valid() {
-		return nil
-	}
 	// extract the actual key
 	actualKey, _, _, err := getVersionedKey(vi.iter.Key())
 	if err != nil {
 		return nil
 	}
-	// return the cleaned key without the prefix
+	// return clean key without the prefix
 	return removePrefix(actualKey, vi.prefix)
 }
 
@@ -402,8 +364,31 @@ func (vi *VersionedIterator) Close() {
 	vi.iter.Close()
 }
 
-// seekVersionedKey seeks to the next versioned key in the iterator.
-func (vi *VersionedIterator) seekVersionedKey() (valid bool) {
+// seekNextValidKey seeks to the next valid (non-tombstone) key within the version bounds
+func (vi *VersionedIterator) seekNextValidKey(forward bool) bool {
+	for {
+		// seek to the latest version of the current key
+		if !vi.seekLatestVersionOfKey() {
+			return false
+		}
+		// retrieve seeked key
+		_, version, tombstone, err := getVersionedKey(vi.iter.Key())
+		if err != nil {
+			return false
+		}
+		// valid key found, break
+		if !tombstone && version <= vi.version {
+			return true
+		}
+		// otherwise, continue to the next key
+		if !vi.moveToNextLogicalKey(forward) {
+			return false
+		}
+	}
+}
+
+// seekLatestVersionOfKey seeks to the latest version of the current key in the iterator.
+func (vi *VersionedIterator) seekLatestVersionOfKey() (valid bool) {
 	// get the current currentKey
 	currentKey, _, _, err := getVersionedKey(vi.iter.Key())
 	if err != nil {
