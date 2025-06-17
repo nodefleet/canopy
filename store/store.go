@@ -227,16 +227,16 @@ func (s *Store) Commit() (root []byte, err lib.ErrorI) {
 
 // Write() writes the current state to the batch writer without committing it.
 func (s *Store) Write() lib.ErrorI {
-	if er := s.sc.store.(TxnWriterI).Write(); er != nil {
+	if er := s.sc.store.(TxnWriterI).Commit(); er != nil {
 		return ErrCommitDB(er)
 	}
-	if e := s.lss.Write(); e != nil {
+	if e := s.lss.Commit(); e != nil {
 		return ErrCommitDB(e)
 	}
-	if e := s.hss.Write(); e != nil {
+	if e := s.hss.Commit(); e != nil {
 		return ErrCommitDB(e)
 	}
-	if e := s.Indexer.db.Write(); e != nil {
+	if e := s.Indexer.db.Commit(); e != nil {
 		return ErrCommitDB(e)
 	}
 	return nil
@@ -573,7 +573,7 @@ func (s *Store) setCommitID(version uint64, root []byte) lib.ErrorI {
 		return err
 	}
 
-	return w.Write()
+	return w.Commit()
 }
 
 // historicalPrefix() calculates the prefix for a particular historical partition given the block height

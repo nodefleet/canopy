@@ -247,10 +247,10 @@ func TestVersionedStoreSet(t *testing.T) {
 			if tt.readUncommitted {
 				batch = db.NewIndexedBatch()
 			}
-			vs, err := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
-			require.NoError(t, err)
+			vs, libErr := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			require.NoError(t, libErr)
 			// apply the store state setup function
-			err = tt.operations(t, vs)
+			err := tt.operations(t, vs)
 			if tt.expectedError != nil {
 				assert.NotNil(t, err)
 				assert.Equal(t, tt.expectedError, err)
@@ -317,10 +317,10 @@ func TestVersionedStoreDelete(t *testing.T) {
 			if tt.readUncommitted {
 				batch = db.NewIndexedBatch()
 			}
-			vs, err := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
-			require.NoError(t, err)
+			vs, libErr := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			require.NoError(t, libErr)
 			// apply the store state setup function
-			err = tt.operations(t, vs)
+			err := tt.operations(t, vs)
 			if tt.expectedError != nil {
 				assert.NotNil(t, err)
 				assert.Equal(t, tt.expectedError, err)
@@ -462,23 +462,6 @@ func TestVersionedIterator(t *testing.T) {
 		value     []byte
 		version   uint64
 		tombstone bool
-	}
-	// helper to create a versioned iterator for testing
-	createIterator := func(t *testing.T, prefix []byte, vs *VersionedStore,
-		reverse, allVersions bool) *VersionedIterator {
-		if reverse {
-			vi, err := vs.RevIterator(prefix)
-			require.NoError(t, err)
-			return vi.(*VersionedIterator)
-		}
-		if allVersions {
-			vi, err := vs.ArchiveIterator(prefix)
-			require.NoError(t, err)
-			return vi.(*VersionedIterator)
-		}
-		vi, err := vs.Iterator(prefix)
-		require.NoError(t, err)
-		return vi.(*VersionedIterator)
 	}
 	// test cases
 	tests := []struct {
@@ -919,7 +902,9 @@ func TestVersionedIterator(t *testing.T) {
 			vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version, false)
 			require.NoError(t, err)
 			// create iterator
-			iter := createIterator(t, []byte(tt.prefix), vs, tt.reverse, tt.allVersions)
+			testIter, err := vs.NewIterator([]byte(tt.prefix), tt.reverse, tt.allVersions)
+			require.NoError(t, err)
+			iter := testIter.(*VersionedIterator)
 			defer iter.Close()
 			// validate the iterator
 			i := 0

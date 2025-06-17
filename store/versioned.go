@@ -45,10 +45,13 @@ type VersionedStore struct {
 }
 
 // NewVersionedStore creates a new VersionedStore with the given database and initial version.
-func NewVersionedStore(reader *pebble.Snapshot, writer *pebble.Batch, version uint64, readUncommitted bool) (*VersionedStore, error) {
+func NewVersionedStore(reader *pebble.Snapshot, writer *pebble.Batch, version uint64, readUncommitted bool) (*VersionedStore, lib.ErrorI) {
 	// minimum version is 1 and maximum version is math.MaxUint64 - 1 due to lexicographical ordering
-	if version == 0 || version == math.MaxUint64 {
-		return nil, ErrInvalidVersion()
+	if version == 0 {
+		version = 1
+	}
+	if version == math.MaxUint64 {
+		version = math.MaxUint64 - 1
 	}
 
 	return &VersionedStore{
@@ -110,6 +113,39 @@ func (vs *VersionedStore) Commit() lib.ErrorI {
 // Version returns the current version of the store.
 func (vs *VersionedStore) Version() uint64 {
 	return vs.version
+}
+
+// NewIterator creates a new iterator for the versioned store
+func (vs *VersionedStore) NewIterator(prefix []byte, reverse, allVersions bool) (lib.IteratorI, lib.ErrorI) {
+	return vs.iterator(prefix, reverse, allVersions)
+}
+
+// Iterator creates a new iterator that iterates over all the keys in the store up to the current version.
+func (vs *VersionedStore) Iterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
+	return vs.iterator(prefix, false, false)
+}
+
+// RevIterator creates a new iterator that iterates over all versions of keys in the store in reverse order.
+func (vs *VersionedStore) RevIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
+	return vs.iterator(prefix, true, false)
+}
+
+// ArchiveIterator creates a new iterator that iterates over all versions of keys in the store.
+func (vs *VersionedStore) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
+	return vs.iterator(prefix, false, true)
+}
+
+// Discard closes the reader of the versioned store.
+func (vs *VersionedStore) Discard() {
+	vs.reader.Close()
+}
+
+// Cancel closes the writer of the versioned store.
+func (vs *VersionedStore) Cancel() {
+	// close the writer
+	vs.writer.Close()
+	// mark the store as committed
+	vs.committed.Store(true)
 }
 
 // set sets the value for a key at the next version
@@ -191,31 +227,6 @@ func (vs *VersionedStore) nextVersion() uint64 {
 		return math.MaxUint64
 	}
 	return vs.version + 1
-}
-
-// validateKey performs basic validation on the key.
-func validateKey(key []byte) lib.ErrorI {
-	// sanity check for empty key
-	if len(key) == 0 {
-		return ErrInvalidKey()
-	}
-	// exit
-	return nil
-}
-
-// Iterator creates a new iterator that iterates over all the keys in the store up to the current version.
-func (vs *VersionedStore) Iterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
-	return vs.iterator(prefix, false, false)
-}
-
-// RevIterator creates a new iterator that iterates over all versions of keys in the store in reverse order.
-func (vs *VersionedStore) RevIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
-	return vs.iterator(prefix, true, false)
-}
-
-// ArchiveIterator creates a new iterator that iterates over all versions of keys in the store.
-func (vs *VersionedStore) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
-	return vs.iterator(prefix, false, true)
 }
 
 // iterator creates a new iterator for the versioned store.
@@ -459,6 +470,16 @@ func getVersionedKey(key []byte) (actualKey []byte, version uint64, tombstone bo
 	actualKey = make([]byte, versionIdx)
 	copy(actualKey, key[:versionIdx])
 	return actualKey, version, tombstone, nil
+}
+
+// validateKey performs basic validation on the key.
+func validateKey(key []byte) lib.ErrorI {
+	// sanity check for empty key
+	if len(key) == 0 {
+		return ErrInvalidKey()
+	}
+	// exit
+	return nil
 }
 
 // endPrefix constructs the end bound for a prefix by incrementing the last

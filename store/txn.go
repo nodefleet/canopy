@@ -56,7 +56,7 @@ const (
 // Txn implements this itself to allow for nested transactions
 type TxnReaderI interface {
 	Get(key []byte) ([]byte, lib.ErrorI)
-	NewIterator(prefix []byte, reverse bool, allVersions bool) lib.IteratorI
+	NewIterator(prefix []byte, reverse bool, allVersions bool) (lib.IteratorI, lib.ErrorI)
 	Discard()
 }
 
@@ -65,8 +65,7 @@ type TxnReaderI interface {
 type TxnWriterI interface {
 	Set(key, value []byte) lib.ErrorI
 	Delete(key []byte) lib.ErrorI
-	SetEntry(entry *badger.Entry) lib.ErrorI
-	Write() lib.ErrorI
+	Commit() lib.ErrorI
 	Cancel()
 }
 
@@ -247,19 +246,25 @@ func (t *Txn) addToSorted(key string) {
 
 // Iterator() returns a new iterator for merged iteration of both the in-memory operations and parent store with the given prefix
 func (t *Txn) Iterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
-	it := t.reader.NewIterator(prefix, false, false)
+	it, err := t.reader.NewIterator(prefix, false, false)
+	if err != nil {
+		return nil, err
+	}
 	return newTxnIterator(it, t.cache.copy(), t.prefix, prefix, false), nil
 }
 
 // RevIterator() returns a new reverse iterator for merged iteration of both the in-memory operations and parent store with the given prefix
 func (t *Txn) RevIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
-	it := t.reader.NewIterator(prefix, true, false)
+	it, err := t.reader.NewIterator(prefix, true, false)
+	if err != nil {
+		return nil, err
+	}
 	return newTxnIterator(it, t.cache.copy(), t.prefix, prefix, true), nil
 }
 
 // ArchiveIterator() creates a new iterator for all versions under the given prefix in the BadgerDB transaction
 func (t *Txn) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
-	return t.reader.NewIterator(prefix, false, true), nil
+	return t.reader.NewIterator(prefix, false, true)
 }
 
 // Discard() clears all in-memory operations and resets the sorted key list
@@ -273,8 +278,8 @@ func (t *Txn) Cancel() {
 	t.writer.Cancel()
 }
 
-// Write() flushes the in-memory operations to the batch writer and clears in-memory changes
-func (t *Txn) Write() lib.ErrorI {
+// Commit() flushes the in-memory operations to the batch writer and clears in-memory changes
+func (t *Txn) Commit() lib.ErrorI {
 	for _, v := range t.cache.ops {
 		sk := v.key
 		switch v.op {
@@ -286,16 +291,6 @@ func (t *Txn) Write() lib.ErrorI {
 			if err := t.writer.Delete(sk); err != nil {
 				return ErrStoreDelete(err)
 			}
-		case opTombstone:
-			// set an entry with a bit that marks it as deleted and prevents it from being discarded
-			if err := t.writer.SetEntry(newEntry(sk, nil, badgerDeleteBit|badgerNoDiscardBit)); err != nil {
-				return ErrStoreDelete(err)
-			}
-		case opEntry:
-			// set the entry in the batch
-			if err := t.writer.SetEntry(v.valueEntry); err != nil {
-				return ErrStoreSet(err)
-			}
 		}
 	}
 	t.Discard() // clear the in-memory operations after writing
@@ -303,12 +298,15 @@ func (t *Txn) Write() lib.ErrorI {
 	return nil
 }
 
-func (t *Txn) NewIterator(prefix []byte, reverse bool, allVersions bool) lib.IteratorI {
+func (t *Txn) NewIterator(prefix []byte, reverse bool, allVersions bool) (lib.IteratorI, lib.ErrorI) {
 	// Combine the current in-memory cache and parent reader (recursively)
-	combinedParentIterator := t.reader.NewIterator(lib.Append(t.prefix, prefix), reverse, allVersions)
+	combinedParentIterator, err := t.reader.NewIterator(lib.Append(t.prefix, prefix), reverse, allVersions)
+	if err != nil {
+		return nil, ErrStoreIterator(err)
+	}
 
 	// Create a merged iterator for the parent and in-memory cache
-	return newTxnIterator(combinedParentIterator, t.cache, t.prefix, prefix, reverse)
+	return newTxnIterator(combinedParentIterator, t.cache, t.prefix, prefix, reverse), nil
 }
 
 // Close() cancels the current transaction. Any new writes will result in an error and a new
@@ -317,8 +315,6 @@ func (t *Txn) Close() {
 	t.reader.Discard()
 	t.writer.Cancel()
 }
-func (t *Txn) setDBWriter(w *badger.WriteBatch) { t.writer = BadgerTxnWriter{w} }
-func (t *Txn) setDBReader(r *badger.Txn)        { t.reader = BadgerTxnReader{r, t.prefix} }
 
 // TXN ITERATOR CODE BELOW
 
@@ -577,7 +573,7 @@ func (r BadgerTxnReader) Get(key []byte) ([]byte, lib.ErrorI) {
 	return val, nil
 }
 
-func (r BadgerTxnReader) NewIterator(prefix []byte, reverse bool, allVersions bool) lib.IteratorI {
+func (r BadgerTxnReader) NewIterator(prefix []byte, reverse bool, allVersions bool) (lib.IteratorI, lib.ErrorI) {
 	newPrefix := lib.Append(r.prefix, prefix)
 	it := r.Txn.NewIterator(badger.IteratorOptions{
 		Prefix:      newPrefix,
@@ -592,7 +588,7 @@ func (r BadgerTxnReader) NewIterator(prefix []byte, reverse bool, allVersions bo
 	return &Iterator{
 		reader: it,
 		prefix: r.prefix,
-	}
+	}, nil
 }
 
 func (r BadgerTxnReader) Discard() {
@@ -627,7 +623,7 @@ func (w BadgerTxnWriter) SetEntry(entry *badger.Entry) lib.ErrorI {
 	return nil
 }
 
-func (w BadgerTxnWriter) Write() lib.ErrorI {
+func (w BadgerTxnWriter) Commit() lib.ErrorI {
 	err := w.WriteBatch.Flush()
 	if err != nil {
 		return ErrFlushBatch(err)
