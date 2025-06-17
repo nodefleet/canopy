@@ -198,6 +198,10 @@ func (s *Store) Copy() (lib.StoreI, lib.ErrorI) {
 func (s *Store) Commit() (root []byte, err lib.ErrorI) {
 	// update the version (height) number
 	s.version++
+	// execute operations over the tree and hash upwards to get the new root
+	if e := s.sc.Commit(); e != nil {
+		return nil, e
+	}
 	// get the root from the sparse merkle tree at the current state
 	s.root = s.sc.Root()
 	// set the new CommitID (to the Transaction not the actual DB)
@@ -210,7 +214,7 @@ func (s *Store) Commit() (root []byte, err lib.ErrorI) {
 	defer s.metrics.UpdateStoreMetrics(size, entries, time.Time{}, time.Now())
 	// finally commit the entire Transaction to the actual DB under the proper version (height) number
 	if e := s.Write(); e != nil {
-		return nil, err
+		return nil, e
 	}
 	if e := s.writer.Flush(); e != nil {
 		return nil, ErrCommitDB(e)
@@ -481,7 +485,12 @@ func (s *Store) DB() *badger.DB { return s.db }
 
 // Root() retrieves the root hash of the StateCommitStore, representing the current root of the
 // Sparse Merkle Tree. This hash is used for verifying the integrity and consistency of the state.
-func (s *Store) Root() (root []byte, err lib.ErrorI) { return s.sc.Root(), nil }
+func (s *Store) Root() (root []byte, err lib.ErrorI) {
+	if err = s.sc.Commit(); err != nil {
+		return nil, err
+	}
+	return s.sc.Root(), nil
+}
 
 // Reset() discard and re-sets the stores writer
 func (s *Store) Reset() {
