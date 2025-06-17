@@ -80,11 +80,14 @@ type Store struct {
 	log                 lib.LoggerI  // logger
 }
 
+var hotfixConfig lib.Config
+
 // New() creates a new instance of a StoreI either in memory or an actual disk DB
 func New(config lib.Config, metrics *lib.Metrics, l lib.LoggerI) (lib.StoreI, lib.ErrorI) {
 	if config.StoreConfig.InMemory {
 		return NewStoreInMemory(l)
 	}
+	hotfixConfig = config
 	return NewStore(filepath.Join(config.DataDirPath, config.DBName), metrics, l)
 }
 
@@ -140,8 +143,9 @@ func NewStoreWithDB(db *badger.DB, metrics *lib.Metrics, log lib.LoggerI, write 
 func (s *Store) NewReadOnly(queryVersion uint64) (lib.StoreI, lib.ErrorI) {
 	// create a variable to signal if the historical state store should be utilized
 	var useHistorical bool
+	chainId := hotfixConfig.ChainId
 	// if the query version is older than the partition frequency
-	if queryVersion <= 233000 {
+	if (queryVersion <= 233000 && chainId == 1) || (queryVersion <= 232000 && chainId == 2) {
 		useHistorical = true
 	}
 	// make a reader for the specified version
