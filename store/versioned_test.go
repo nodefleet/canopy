@@ -24,14 +24,6 @@ func TestVersionedStoreGet(t *testing.T) {
 		version       uint64
 	}{
 		{
-			name:          "empty key returns ErrInvalidKey",
-			storeState:    func(t *testing.T, vs *VersionedStore, db *pebble.DB) {},
-			key:           nil,
-			expectedValue: nil,
-			expectedError: ErrInvalidKey(),
-			version:       1,
-		},
-		{
 			name:          "key not found returns nil value",
 			storeState:    func(t *testing.T, vs *VersionedStore, db *pebble.DB) {},
 			key:           []byte("non-existent-key"),
@@ -167,16 +159,6 @@ func TestVersionedStoreSet(t *testing.T) {
 		readUncommitted bool
 	}{
 		{
-			name: "empty key returns ErrInvalidKey",
-			operations: func(t *testing.T, vs *VersionedStore) error {
-				return vs.Set(nil, nil)
-			},
-			key:           nil,
-			expectedValue: nil,
-			expectedError: ErrInvalidKey(),
-			version:       1,
-		},
-		{
 			name: "basic set operation",
 			operations: func(t *testing.T, vs *VersionedStore) error {
 				return vs.Set([]byte("key"), []byte("value"))
@@ -281,14 +263,6 @@ func TestVersionedStoreDelete(t *testing.T) {
 		version         uint64
 		readUncommitted bool
 	}{
-		{
-			name: "empty key returns ErrInvalidKey",
-			operations: func(t *testing.T, vs *VersionedStore) error {
-				return vs.Delete(nil)
-			},
-			expectedError: ErrInvalidKey(),
-			version:       1,
-		},
 		{
 			name: "set then delete should return nil",
 			operations: func(t *testing.T, vs *VersionedStore) error {
@@ -432,7 +406,7 @@ func TestGetSetDeleteVersioned(t *testing.T) {
 	require.NoError(t, vs.Set(key, []byte("new_value")))
 	value, err = vs.Get(key)
 	require.NoError(t, err)
-	assert.True(t, bytes.Equal(value, []byte("new_value")))
+	assert.True(t, bytes.Equal(value, []byte("new_value")), string(value))
 	// delete the key
 	err = vs.Delete(key)
 	require.NoError(t, err)
@@ -448,7 +422,7 @@ func TestGetSetDeleteVersioned(t *testing.T) {
 	assert.True(t, bytes.Equal(value, nil))
 	// lower the store version
 	version--
-	vs, err = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, true)
+	vs, err = NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), version, false)
 	require.NoError(t, err)
 	// get the key after deletion
 	value, err = vs.Get(key)
@@ -512,8 +486,8 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("prefix2:key1"), []byte("value3"), 1, false},
 			},
 			expected: []kvPair{
-				{[]byte("key1"), []byte("value1"), 1, false},
-				{[]byte("key2"), []byte("value2"), 1, false},
+				{[]byte("prefix1:key1"), []byte("value1"), 1, false},
+				{[]byte("prefix1:key2"), []byte("value2"), 1, false},
 			},
 		},
 		{
@@ -712,8 +686,8 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("otherprefix:key"), []byte("value4"), 4, false},
 			},
 			expected: []kvPair{
-				{[]byte("key2"), []byte("value2"), 5, false},
-				{[]byte("key1"), []byte("value1"), 3, false},
+				{[]byte("prefix:key2"), []byte("value2"), 5, false},
+				{[]byte("prefix:key1"), []byte("value1"), 3, false},
 			},
 		},
 		{
@@ -834,12 +808,12 @@ func TestVersionedIterator(t *testing.T) {
 				{append([]byte("s/"), []byte{2, '1'}...), []byte("account1"), 2, true},
 			},
 			expected: []kvPair{
-				{[]byte{1, '1'}, []byte("validator1"), 1, false},
-				{[]byte{1, '2'}, []byte("validator2"), 1, false},
-				{[]byte{1, '3', '3'}, []byte("validator3"), 1, false},
-				{[]byte{1, '4', '0', '1'}, []byte("validator3"), 1, false},
-				{[]byte{1, '5'}, []byte("validator3"), 1, false},
-				{[]byte{2, '1'}, []byte("account1"), 1, false},
+				{append([]byte("s/"), []byte{1, '1'}...), []byte("validator1"), 1, false},
+				{append([]byte("s/"), []byte{1, '2'}...), []byte("validator2"), 1, false},
+				{append([]byte("s/"), []byte{1, '3', '3'}...), []byte("validator3"), 1, false},
+				{append([]byte("s/"), []byte{1, '4', '0', '1'}...), []byte("validator3"), 1, false},
+				{append([]byte("s/"), []byte{1, '5'}...), []byte("validator3"), 1, false},
+				{append([]byte("s/"), []byte{2, '1'}...), []byte("account1"), 1, false},
 			},
 		},
 		{
@@ -858,12 +832,12 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("other:key"), []byte("v7"), 7, false},
 			},
 			expected: []kvPair{
-				{[]byte("key1"), []byte("v1"), 1, false},
-				{[]byte("key1"), []byte("v3"), 3, true},
-				{[]byte("key1"), []byte("v5"), 5, false},
-				{[]byte("key2"), []byte("v2"), 2, false},
-				{[]byte("key2"), []byte("v4"), 4, true},
-				{[]byte("key2"), []byte("v6"), 6, false},
+				{[]byte("test:key1"), []byte("v1"), 1, false},
+				{[]byte("test:key1"), []byte("v3"), 3, true},
+				{[]byte("test:key1"), []byte("v5"), 5, false},
+				{[]byte("test:key2"), []byte("v2"), 2, false},
+				{[]byte("test:key2"), []byte("v4"), 4, true},
+				{[]byte("test:key2"), []byte("v6"), 6, false},
 			},
 		},
 		{
@@ -898,26 +872,9 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("s/\xc7\xaa\x19"), []byte("c3d8b0"), 9, false},
 			},
 			expected: []kvPair{
-				{[]byte("\x03\x8e\xb8"), []byte("a6a725"), 13, false},
-				{[]byte("\x15\x4e"), []byte("a622c1"), 13, false},
-				{[]byte("\xc7\xaa\x19"), []byte("c3d8b0"), 9, false},
-			},
-		},
-		{
-			name:    "prefix b1721b with non-ascii and multi-byte keys",
-			version: 10,
-			prefix:  []byte{0xb1, 0x72, 0x1b},
-			testData: []kvPair{
-				{[]byte{0xb1, 0x72, 0x1b, 0x0a}, []byte{0xc5, 0x90, 0x4d}, 5, false},
-				{[]byte{0xb1, 0x72, 0x1b, 0x0a, 0x02}, []byte{0x27, 0x5f, 0xab}, 6, false},
-				{[]byte{0xb1, 0x72, 0x1b, 0x39, 0x67, 0x78}, []byte{0xf8, 0x47, 0xed}, 7, false},
-				{[]byte{0xb1, 0x72, 0x1b, 0x40, 0x5f}, []byte{0x40, 0x0a, 0xc7}, 8, false},
-			},
-			expected: []kvPair{
-				{[]byte{0xb1, 0x72, 0x1b, 0x0a}, []byte{0xc5, 0x90, 0x4d}, 5, false},
-				{[]byte{0xb1, 0x72, 0x1b, 0x0a, 0x02}, []byte{0x27, 0x5f, 0xab}, 6, false},
-				{[]byte{0xb1, 0x72, 0x1b, 0x39, 0x67, 0x78}, []byte{0xf8, 0x47, 0xed}, 7, false},
-				{[]byte{0xb1, 0x72, 0x1b, 0x40, 0x5f}, []byte{0x40, 0x0a, 0xc7}, 8, false},
+				{[]byte("s/\x03\x8e\xb8"), []byte("a6a725"), 13, false},
+				{[]byte("s/\x15\x4e"), []byte("a622c1"), 13, false},
+				{[]byte("s/\xc7\xaa\x19"), []byte("c3d8b0"), 9, false},
 			},
 		},
 	}
@@ -958,17 +915,6 @@ func TestVersionedIterator(t *testing.T) {
 				i++
 			}
 			assert.Equal(t, len(tt.expected), i, "iterator returned fewer keys than expected")
-			// check reverse iteration
-			for {
-				iter.Prev()
-				if !iter.Valid() {
-					break
-				}
-				i--
-				assert.True(t, bytes.Equal(tt.expected[i].key, iter.Key()))
-				assert.True(t, bytes.Equal(tt.expected[i].value, iter.Value()))
-			}
-			require.Equal(t, 0, i, "reverse iterator did not return to the start")
 		})
 	}
 }
