@@ -2,7 +2,6 @@ package lib
 
 import (
 	"bytes"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -39,9 +38,9 @@ func init() {
 // Page is a pagination wrapper over a slice of data
 type Page struct {
 	PageParams          // the input parameters for the page
-	Results    Pageable `json:"results"`    // the actual returned array of items
-	Type       string   `json:"type"`       // the type of the page
-	Count      int      `json:"count"`      // count of items included in the page
+	Results    Pageable `json:"results"` // the actual returned array of items
+	Type       string   `json:"type"` // the type of the page
+	Count      int      `json:"count"` // count of items included in the page
 	TotalPages int      `json:"totalPages"` // number of pages that exist based on these page parameters
 	TotalCount int      `json:"totalCount"` // count of items that exist
 }
@@ -786,11 +785,4 @@ func ContainsByteSlice(list [][]byte, target []byte) (found bool) {
 		}
 	}
 	return
-}
-
-func BytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	return subtle.ConstantTimeCompare(a, b) == 1
 }
