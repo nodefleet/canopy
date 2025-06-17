@@ -6,11 +6,10 @@ import (
 	"math"
 	"path/filepath"
 	"sync/atomic"
-	"time"
 
-	"github.com/alecthomas/units"
 	"github.com/canopy-network/canopy/lib"
-	"github.com/dgraph-io/badger/v4"
+	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble/v2/vfs"
 )
 
 const (
@@ -22,11 +21,6 @@ const (
 	partitionExistsKey    = "e/"         // to check if partition exists
 	partitionFrequency    = uint64(1000) // blocks
 	maxKeyBytes           = 256          // maximum size of a key
-)
-
-// maximum size of the database (batch) transaction
-var maxTransactionSize = int64(
-	math.Ceil(float64(128*units.MB) / badgerDBMaxBatchScalingFactor),
 )
 
 var _ lib.StoreI = &Store{} // enforce the Store interface
@@ -64,18 +58,17 @@ lexicographically ordered prefix keys to facilitate easy and efficient iteration
 */
 
 type Store struct {
-	version             uint64             // version of the store
-	root                []byte             // root associated with the CommitID at this version
-	db                  *badger.DB         // underlying database
-	reader              *badger.Txn        // reader to view committed data
-	writer              *badger.WriteBatch // the batch writer that allows committing it all at once
-	lss                 *Txn               // reference to the 'latest' state store
-	sc                  *SMT               // reference to the state commitment store
-	*Indexer                               // reference to the indexer store
-	useHistorical       bool               // signals to use the historical state store for query
-	isGarbageCollecting atomic.Bool        // protect garbage collector (only 1 at a time)
-	metrics             *lib.Metrics       // telemetry
-	log                 lib.LoggerI        // logger
+	version             uint64          // version of the store
+	root                []byte          // root associated with the CommitID at this version
+	db                  *pebble.DB      // underlying database
+	reader              *VersionedStore // reader to view committed data
+	writer              *VersionedStore // the batch writer that allows committing it all at once
+	lss                 *Txn            // reference to the 'latest' state store
+	sc                  *SMT            // reference to the state commitment store
+	*Indexer                            // reference to the indexer store
+	isGarbageCollecting atomic.Bool     // protect garbage collector (only 1 at a time)
+	metrics             *lib.Metrics    // telemetry
+	log                 lib.LoggerI     // logger
 }
 
 // New() creates a new instance of a StoreI either in memory or an actual disk DB
@@ -88,16 +81,11 @@ func New(config lib.Config, metrics *lib.Metrics, l lib.LoggerI) (lib.StoreI, li
 
 // NewStore() creates a new instance of a disk DB
 func NewStore(path string, metrics *lib.Metrics, log lib.LoggerI) (lib.StoreI, lib.ErrorI) {
-	// use badger DB in managed mode to allow easy versioning
-	// memTableSize is set to 1.28GB (max) to allow 128MB (10%) of writes in a
-	// single batch. It is seemingly unknown why the 10% limit is set
-	// https://discuss.dgraph.io/t/discussion-badgerdb-should-offer-arbitrarily-sized-atomic-transactions/8736
-	db, err := badger.OpenManaged(
-		badger.DefaultOptions(path).
-			WithNumVersionsToKeep(math.MaxInt64).
-			WithLoggingLevel(badger.ERROR).
-			WithMemTableSize(maxTransactionSize),
-	)
+	db, err := pebble.Open(path, &pebble.Options{
+		FormatMajorVersion: pebble.FormatColumnarBlocks,
+		FS:                 vfs.Default,
+		MaxOpenFiles:       500,
+	})
 	if err != nil {
 		return nil, ErrOpenDB(err)
 	}
@@ -106,8 +94,10 @@ func NewStore(path string, metrics *lib.Metrics, log lib.LoggerI) (lib.StoreI, l
 
 // NewStoreInMemory() creates a new instance of a mem DB
 func NewStoreInMemory(log lib.LoggerI) (lib.StoreI, lib.ErrorI) {
-	db, err := badger.OpenManaged(badger.DefaultOptions("").
-		WithInMemory(true).WithLoggingLevel(badger.ERROR))
+	db, err := pebble.Open("", &pebble.Options{
+		FS:                 vfs.NewMem(),
+		FormatMajorVersion: pebble.FormatColumnarBlocks,
+	})
 	if err != nil {
 		return nil, ErrOpenDB(err)
 	}
@@ -115,24 +105,24 @@ func NewStoreInMemory(log lib.LoggerI) (lib.StoreI, lib.ErrorI) {
 }
 
 // NewStoreWithDB() returns a Store object given a DB and a logger
-func NewStoreWithDB(db *badger.DB, metrics *lib.Metrics, log lib.LoggerI, write bool) (*Store, lib.ErrorI) {
+func NewStoreWithDB(db *pebble.DB, metrics *lib.Metrics, log lib.LoggerI, write bool) (*Store, lib.ErrorI) {
 	// get the latest CommitID (height and hash)
 	id := getLatestCommitID(db, log)
-	// make a writable tx that reads from the last height
-	reader := db.NewTransactionAt(id.Height, false)
-	// create a new batch writer for the next version as the version cannot
-	// be set at the commit time
-	writer := db.NewWriteBatchAt(id.Height + 1)
+	// create a new versioned store at the latest height
+	vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), id.Height, false)
+	if err != nil {
+		return nil, ErrOpenDB(err)
+	}
 	// return the store object
 	return &Store{
 		version: id.Height,
 		log:     log,
 		db:      db,
-		reader:  reader,
-		writer:  writer,
-		lss:     NewBadgerTxn(reader, writer, []byte(latestStatePrefix), true, log),
-		sc:      NewDefaultSMT(NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), false, log)),
-		Indexer: &Indexer{NewBadgerTxn(reader, writer, []byte(indexerPrefix), true, log)},
+		reader:  vs,
+		writer:  vs,
+		lss:     NewTxn(vs, vs, []byte(latestStatePrefix), true, log),
+		sc:      NewDefaultSMT(NewTxn(vs, vs, []byte(stateCommitmentPrefix), false, log)),
+		Indexer: &Indexer{NewTxn(vs, vs, []byte(indexerPrefix), true, log)},
 		metrics: metrics,
 		root:    id.Root,
 	}, nil
@@ -140,31 +130,27 @@ func NewStoreWithDB(db *badger.DB, metrics *lib.Metrics, log lib.LoggerI, write 
 
 // NewReadOnly() returns a store without a writer - meant for historical read only queries
 func (s *Store) NewReadOnly(queryVersion uint64) (lib.StoreI, lib.ErrorI) {
-	// create a variable to signal if the historical state store should be utilized
-	var useHistorical bool
-	// if the query version is older than the partition frequency
-	if queryVersion < partitionHeight(s.version) {
-		useHistorical = true
+	// create a new versioned store at the specified version
+	vs, err := NewVersionedStore(s.db.NewSnapshot(), s.db.NewBatch(), queryVersion, false)
+	if err != nil {
+		return nil, ErrOpenDB(err)
 	}
-	// make a reader for the specified version
-	reader := s.db.NewTransactionAt(queryVersion, false)
-	// create a batch writer for the specified version.
-	// BadgerDB does not allow a batch writer to be set at a version 0
-	// as this is just a reader attempting to write to this will fail
-	writer := s.db.NewWriteBatchAt(0)
-	// return the store object
+	// commit the versioned so no writes can be made to it
+	err = vs.Commit()
+	if err != nil {
+		return nil, ErrCommitDB(err)
+	}
 	return &Store{
-		version:       queryVersion,
-		log:           s.log,
-		db:            s.db,
-		reader:        reader,
-		writer:        writer,
-		lss:           NewBadgerTxn(reader, writer, []byte(latestStatePrefix), true, s.log),
-		sc:            NewDefaultSMT(NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), false, s.log)),
-		Indexer:       &Indexer{NewBadgerTxn(reader, writer, []byte(indexerPrefix), true, s.log)},
-		useHistorical: useHistorical,
-		metrics:       s.metrics,
-		root:          bytes.Clone(s.root),
+		version: queryVersion,
+		log:     s.log,
+		db:      s.db,
+		reader:  vs,
+		writer:  vs,
+		lss:     NewTxn(vs, vs, []byte(latestStatePrefix), true, s.log),
+		sc:      NewDefaultSMT(NewTxn(vs, vs, []byte(stateCommitmentPrefix), false, s.log)),
+		Indexer: &Indexer{NewTxn(vs, vs, []byte(indexerPrefix), true, s.log)},
+		metrics: s.metrics,
+		root:    bytes.Clone(s.root),
 	}, nil
 }
 
@@ -172,17 +158,19 @@ func (s *Store) NewReadOnly(queryVersion uint64) (lib.StoreI, lib.ErrorI) {
 // this can be useful for having two simultaneous copies of the store
 // ex: Mempool state and FSM state
 func (s *Store) Copy() (lib.StoreI, lib.ErrorI) {
-	reader := s.db.NewTransactionAt(s.version, false)
-	writer := s.db.NewWriteBatchAt(s.version + 1)
+	vs, err := NewVersionedStore(s.db.NewSnapshot(), s.db.NewBatch(), s.version, false)
+	if err != nil {
+		return nil, ErrOpenDB(err)
+	}
 	return &Store{
 		version: s.version,
 		log:     s.log,
 		db:      s.db,
-		reader:  reader,
-		writer:  writer,
-		lss:     NewBadgerTxn(reader, writer, []byte(latestStatePrefix), true, s.log),
-		sc:      NewDefaultSMT(NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), false, s.log)),
-		Indexer: &Indexer{NewBadgerTxn(reader, writer, []byte(indexerPrefix), true, s.log)},
+		reader:  vs,
+		writer:  vs,
+		lss:     NewTxn(vs, vs, []byte(latestStatePrefix), true, s.log),
+		sc:      NewDefaultSMT(NewTxn(vs, vs, []byte(stateCommitmentPrefix), false, s.log)),
+		Indexer: &Indexer{NewTxn(vs, vs, []byte(indexerPrefix), true, s.log)},
 		metrics: s.metrics,
 		root:    bytes.Clone(s.root),
 	}, nil
@@ -203,14 +191,14 @@ func (s *Store) Commit() (root []byte, err lib.ErrorI) {
 		return nil, err
 	}
 	// extract the internal metrics from the badger Txn
-	size, entries := getSizeAndCountFromBatch(s.writer)
+	// size, entries := getSizeAndCountFromBatch(s.writer)
 	// update the metrics once complete
-	defer s.metrics.UpdateStoreMetrics(size, entries, time.Time{}, time.Now())
+	// defer s.metrics.UpdateStoreMetrics(size, entries, time.Time{}, time.Now())
 	// finally commit the entire Transaction to the actual DB under the proper version (height) number
 	if e := s.Write(); e != nil {
 		return nil, e
 	}
-	if e := s.writer.Flush(); e != nil {
+	if e := s.writer.Commit(); e != nil {
 		return nil, ErrCommitDB(e)
 	}
 	// reset the writer for the next height
@@ -322,9 +310,9 @@ func (s *Store) NewTxn() lib.StoreI {
 	}
 }
 
-// DB() returns the underlying BadgerDB instance associated with the Store, providing access
+// DB() returns the underlying PebbleDB instance associated with the Store, providing access
 // to the database for direct operations and management.
-func (s *Store) DB() *badger.DB { return s.db }
+func (s *Store) DB() *pebble.DB { return s.db }
 
 // Root() retrieves the root hash of the StateCommitStore, representing the current root of the
 // Sparse Merkle Tree. This hash is used for verifying the integrity and consistency of the state.
@@ -357,21 +345,18 @@ func (s *Store) Close() lib.ErrorI {
 
 // resetWriter() closes the writer, and creates a new writer, and sets the writer to the 3 main abstractions
 func (s *Store) resetWriter() {
-	// create new transactions first before discarding old ones
-	newReader := s.db.NewTransactionAt(s.version, false)
-	// create a new batch writer for the next version as the version cannot
-	// be set at the commit time
-	newWriter := s.db.NewWriteBatchAt(s.version + 1)
+	// TODO: handle error
+	newVS, _ := NewVersionedStore(s.db.NewSnapshot(), s.db.NewBatch(), s.version, false)
 	// create all new transaction-dependent objects
-	newLSS := NewBadgerTxn(newReader, newWriter, []byte(latestStatePrefix), true, s.log)
-	newSC := NewDefaultSMT(NewBadgerTxn(newReader, newWriter, []byte(stateCommitmentPrefix), false, s.log))
-	newIndexer := NewBadgerTxn(newReader, newWriter, []byte(indexerPrefix), true, s.log)
+	newLSS := NewTxn(newVS, newVS, []byte(latestStatePrefix), true, s.log)
+	newSC := NewDefaultSMT(NewTxn(newVS, newVS, []byte(stateCommitmentPrefix), false, s.log))
+	newIndexer := NewTxn(newVS, newVS, []byte(indexerPrefix), true, s.log)
 	// only after creating all new objects, discard old transactions
 	s.reader.Discard()
 	s.writer.Cancel()
 	// update all references
-	s.reader = newReader
-	s.writer = newWriter
+	s.reader = newVS
+	s.writer = newVS
 	s.lss = newLSS
 	s.sc = newSC
 	s.Indexer.setDB(newIndexer)
@@ -385,7 +370,7 @@ func (s *Store) commitIDKey(version uint64) []byte {
 // getCommitID() retrieves the CommitID value for the specified version from the database
 func (s *Store) getCommitID(version uint64) (id lib.CommitID, err lib.ErrorI) {
 	var bz []byte
-	bz, err = NewBadgerTxn(s.reader, s.writer, nil, false, s.log).Get(s.commitIDKey(version))
+	bz, err = NewTxn(s.reader, s.writer, nil, false, s.log).Get(s.commitIDKey(version))
 	if err != nil {
 		return
 	}
@@ -397,7 +382,7 @@ func (s *Store) getCommitID(version uint64) (id lib.CommitID, err lib.ErrorI) {
 
 // setCommitID() stores the CommitID for the specified version and root in the database
 func (s *Store) setCommitID(version uint64, root []byte) lib.ErrorI {
-	w := NewBadgerTxn(s.reader, s.writer, nil, false, s.log)
+	w := NewTxn(s.reader, s.writer, nil, false, s.log)
 	value, err := lib.Marshal(&lib.CommitID{
 		Height: version,
 		Root:   root,
@@ -417,18 +402,13 @@ func (s *Store) setCommitID(version uint64, root []byte) lib.ErrorI {
 	return w.Commit()
 }
 
-// partitionHeight() returns the height of the partition given some height
-// (ex. 45000 -> 40000 and 57550 -> 50000)
-func partitionHeight(height uint64) uint64 {
-	if height < partitionFrequency {
-		return 1 // not 0
-	}
-	return (height / partitionFrequency) * partitionFrequency
-}
-
 // getLatestCommitID() retrieves the latest CommitID from the database
-func getLatestCommitID(db *badger.DB, log lib.LoggerI) (id *lib.CommitID) {
-	tx := NewBadgerTxn(db.NewTransactionAt(math.MaxUint64, false), db.NewWriteBatchAt(0), nil, false, log)
+func getLatestCommitID(db *pebble.DB, log lib.LoggerI) (id *lib.CommitID) {
+	vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), math.MaxUint64, false)
+	if err != nil {
+		log.Fatalf("getLatestCommitID() failed with err: %s", err.Error())
+	}
+	tx := NewTxn(vs, vs, nil, false, log)
 	defer tx.Close()
 	id = new(lib.CommitID)
 	bz, err := tx.Get([]byte(lastCommitIDPrefix))

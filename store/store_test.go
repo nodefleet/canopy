@@ -1,63 +1,14 @@
 package store
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
-	"math"
-	"os"
-	"reflect"
-	"runtime/debug"
 	"testing"
-	"unsafe"
 
-	"github.com/alecthomas/units"
 	"github.com/canopy-network/canopy/lib"
-	"github.com/dgraph-io/badger/v4"
+	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble/v2/vfs"
 	"github.com/stretchr/testify/require"
 )
-
-func TestMaxTransaction(t *testing.T) {
-	tempDirector := os.TempDir()
-	db, err := badger.OpenManaged(badger.DefaultOptions(tempDirector).WithMemTableSize(128 * int64(units.MB)).
-		WithNumVersionsToKeep(math.MaxInt).WithLoggingLevel(badger.ERROR))
-	require.NoError(t, err)
-	defer func() { db.Close() }()
-	tx := db.NewTransactionAt(1, true)
-	i := 0
-	totalBytes := 0
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Println(string(debug.Stack()))
-			fmt.Println(i)
-			fmt.Println("TOTAL_MBs", float64(totalBytes)/1000000)
-		}
-	}()
-	for ; i < 128000; i++ {
-		k := numberToBytes(i)
-		v := bytes.Repeat([]byte("b"), 1000)
-		totalBytes += len(k) + len(v)
-		if err = tx.Set(k, v); err != nil {
-			fmt.Println(err.Error())
-			fmt.Println(i)
-			fmt.Println("TOTAL_MBs", float64(totalBytes)/1000000)
-			tx.Discard()
-			return
-		}
-	}
-	require.NoError(t, tx.CommitAt(1, nil))
-	require.NoError(t, FlushMemTable(db))
-	require.NoError(t, db.Flatten(1))
-}
-
-func numberToBytes(n int) []byte {
-	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.BigEndian, uint32(n))
-	if err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
-}
 
 func TestStoreSetGetDelete(t *testing.T) {
 	store, _, cleanup := testStore(t)
@@ -127,44 +78,11 @@ func TestIteratorCommitAndPrefixed(t *testing.T) {
 	it4.Close()
 }
 
-func TestPartitionHeight(t *testing.T) {
-	tests := []struct {
-		name     string
-		height   uint64
-		expected uint64
-	}{
-		{
-			name:     "zero",
-			height:   0,
-			expected: 1,
-		},
-		{
-			name:     "less than partition frequency",
-			height:   999,
-			expected: 1,
-		},
-		{
-			name:     "greater than partition frequency",
-			height:   1001,
-			expected: 1000,
-		},
-		{
-			name:     "2x partition frequency",
-			height:   2789,
-			expected: 2000,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			require.Equal(t, partitionHeight(test.height), test.expected)
-		})
-	}
-}
-
-func testStore(t *testing.T) (*Store, *badger.DB, func()) {
-	db, err := badger.OpenManaged(badger.DefaultOptions("").
-		WithInMemory(true).WithLoggingLevel(badger.ERROR))
-	require.NoError(t, err)
+func testStore(t *testing.T) (*Store, *pebble.DB, func()) {
+	db, err := pebble.Open("", &pebble.Options{
+		FS:                 vfs.NewMem(),
+		FormatMajorVersion: pebble.FormatColumnarBlocks,
+	})
 	store, err := NewStoreWithDB(db, nil, lib.NewDefaultLogger(), true)
 	require.NoError(t, err)
 	return store, db, func() { store.Close() }
@@ -183,11 +101,4 @@ func bulkSetKV(t *testing.T, store lib.WStoreI, prefix string, keyValue ...strin
 	for _, kv := range keyValue {
 		require.NoError(t, store.Set([]byte(prefix+kv), []byte(kv)))
 	}
-}
-
-func getMeta(e *badger.Item) (value byte) {
-	v := reflect.ValueOf(e).Elem()
-	f := v.FieldByName(badgerMetaFieldName)
-	ptr := unsafe.Pointer(f.UnsafeAddr())
-	return *(*byte)(ptr)
 }

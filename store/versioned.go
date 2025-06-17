@@ -46,10 +46,7 @@ type VersionedStore struct {
 
 // NewVersionedStore creates a new VersionedStore with the given database and initial version.
 func NewVersionedStore(reader *pebble.Snapshot, writer *pebble.Batch, version uint64, readUncommitted bool) (*VersionedStore, lib.ErrorI) {
-	// minimum version is 1 and maximum version is math.MaxUint64 - 1 due to lexicographical ordering
-	if version == 0 {
-		version = 1
-	}
+	// maximum version is math.MaxUint64 - 1 due to lexicographical ordering
 	if version == math.MaxUint64 {
 		version = math.MaxUint64 - 1
 	}
@@ -79,12 +76,20 @@ func (vs *VersionedStore) Get(key []byte) (value []byte, err lib.ErrorI) {
 // Set stores a value for a key at the next version to the underlying batch, note that values are
 // not yet committed and will not be visible to readers until the batch is committed. (or readUncommitted is enabled)
 func (vs *VersionedStore) Set(key, value []byte) lib.ErrorI {
+	// perform basic validation on the key
+	if err := validateKey(key); err != nil {
+		return err
+	}
 	return vs.set(key, value, false)
 }
 
 // Delete marks a key as deleted (tombstoned) at the next version in the underlying batch, note that values are
 // not yet committed and will not be visible to readers until the batch is committed. (or readUncommitted is enabled)
 func (vs *VersionedStore) Delete(key []byte) lib.ErrorI {
+	// perform basic validation on the key
+	if err := validateKey(key); err != nil {
+		return err
+	}
 	// actual deletion of live key if any.
 	// Prevents both a live and a tombstone marker existing at the same time
 	err := vs.writer.Delete(makeVersionedKey(key, vs.nextVersion(), false), nil)
@@ -361,7 +366,7 @@ func (vi *VersionedIterator) Key() []byte {
 		return nil
 	}
 	// return clean key without the prefix
-	return removePrefix(actualKey, vi.prefix)
+	return actualKey
 }
 
 // Value returns the value associated with the current key in the iterator.

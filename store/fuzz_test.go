@@ -3,8 +3,10 @@ package store
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	math "math/rand"
+	"math"
+	mathrand "math/rand"
 	"sort"
 	"testing"
 
@@ -62,19 +64,24 @@ func TestFuzzTxn(t *testing.T) {
 }
 
 func doRandomOperation(t *testing.T, db lib.RWStoreI, compare lib.RWStoreI, keys *[]string) {
-	k, v := getRandomBytes(t, math.Intn(4)), getRandomBytes(t, 3)
+	max := math.Max(1, float64(mathrand.Intn(4)))
+	k, v := getRandomBytes(t, int(max)), getRandomBytes(t, 3)
+
 	switch getRandomOperation(t) {
 	case SetTesting:
+		fmt.Printf("Case Set: key=%s value=%s\n", hex.EncodeToString(k), hex.EncodeToString(v))
 		testDBSet(t, db, k, v)
 		testDBSet(t, compare, k, v)
 		*keys = append(*keys, string(k))
 		sort.Strings(*keys)
 		*keys = deDuplicate(*keys)
 	case DelTesting:
+		fmt.Printf("Case Delete: key=%s value=%s\n", hex.EncodeToString(k), hex.EncodeToString(v))
 		k = randomTestKey(t, k, *keys)
 		testDBDelete(t, db, k)
 		testDBDelete(t, compare, k)
 	case GetTesting:
+		fmt.Println("Case Get")
 		k = randomTestKey(t, k, *keys)
 		v1, v2 := testDBGet(t, db, k), testDBGet(t, compare, k)
 		if !bytes.Equal(v1, v2) {
@@ -85,12 +92,14 @@ func doRandomOperation(t *testing.T, db lib.RWStoreI, compare lib.RWStoreI, keys
 		testCompareIterators(t, db, compare, *keys)
 	case WriteTesting:
 		if x, ok := db.(TxnWriterI); ok {
-			switch math.Intn(10) {
+			switch mathrand.Intn(10) {
 			case 0:
+				fmt.Println("Case Write")
 				require.NoError(t, x.Commit())
 			}
 		}
 	case CommitTesting:
+		fmt.Println("Case Commit")
 		if x, ok := db.(lib.StoreI); ok {
 			_, err := x.Commit()
 			require.NoError(t, err)
@@ -121,14 +130,14 @@ func getRandomBytes(t *testing.T, n int) []byte {
 }
 
 func getRandomOperation(_ *testing.T) TestingOp {
-	return TestingOp(math.Intn(6))
+	return TestingOp(mathrand.Intn(6))
 }
 
 func randomTestKey(_ *testing.T, k []byte, keys []string) []byte {
-	if len(keys) != 0 && math.Intn(100) < 85 {
+	if len(keys) != 0 && mathrand.Intn(100) < 85 {
 		// 85% of time use key already found
 		// else default to the random value
-		k = []byte(keys[math.Intn(len(keys))])
+		k = []byte(keys[mathrand.Intn(len(keys))])
 	}
 	return k
 }
@@ -152,24 +161,64 @@ func testCompareIterators(t *testing.T, db lib.RWStoreI, compare lib.RWStoreI, k
 		it1, it2 lib.IteratorI
 		err      error
 	)
-	isReverse := math.Intn(2)
-	prefix := getRandomBytes(t, math.Intn(4))
+	isReverse := mathrand.Intn(2)
+	prefix := getRandomBytes(t, mathrand.Intn(4))
 	require.NoError(t, err)
 	switch isReverse {
+	case 1:
+		fallthrough
 	case 0:
+		fmt.Println("Case iterator prefix:", hex.EncodeToString(prefix), "len:", len(prefix))
+		fmt.Println("--txn iterator--")
+		it2ar, err := compare.(*Txn).Iterator(prefix)
+		require.NoError(t, err)
+		defer it2ar.Close()
+		for ; it2ar.Valid(); it2ar.Next() {
+			fmt.Printf("txn prefix: %s len(%d) key: %s key(hex): %s value: %s\n", hex.EncodeToString(prefix), len(prefix), it2ar.Key(), hex.EncodeToString(it2ar.Key()), hex.EncodeToString(it2ar.Value()))
+		}
+		fmt.Println("--end of txn iterator--")
+
+		fmt.Println("---------- my iterator ----------")
+		it1ar, err := db.(*Store).lss.Iterator(prefix)
+		require.NoError(t, err)
+		defer it1ar.Close()
+		for ; it1ar.Valid(); it1ar.Next() {
+			fmt.Printf("store prefix: %s len(%d) key: %s key(hex): %s value: %s\n", hex.EncodeToString(prefix), len(prefix), it1ar.Key(), hex.EncodeToString(it1ar.Key()), hex.EncodeToString(it1ar.Value()))
+		}
+		fmt.Println("\n---------- end of my iterator ----------")
+
 		it1, err = db.Iterator(prefix)
 		require.NoError(t, err)
 		it2, err = compare.Iterator(prefix)
 		require.NoError(t, err)
-	case 1:
-		it1, err = db.RevIterator(prefix)
+
+		fmt.Println("------ archive iterator-----")
+		archit, err := db.(*Store).lss.ArchiveIterator(prefix)
 		require.NoError(t, err)
-		it2, err = compare.RevIterator(prefix)
-		require.NoError(t, err)
+		defer archit.Close()
+		for ; archit.Valid(); archit.Next() {
+			versionedKey, version, tombstone, err := getVersionedKey(archit.(*VersionedIterator).iter.Key())
+			require.NoError(t, err)
+			// if bytes.HasPrefix(archit.Key(), []byte(latestStatePrefix)) {
+			fmt.Printf("LSS(%t) store version: %d archive prefix: %s len(%d) key: %s key(hex): %s value: %s vk: %s version: %d tombstone: %t\n",
+				bytes.HasPrefix(archit.Key(), []byte(latestStatePrefix)), db.(*Store).version, hex.EncodeToString(prefix),
+				len(prefix), archit.Key(), hex.EncodeToString(archit.Key()), hex.EncodeToString(archit.Value()), versionedKey, version, tombstone)
+			// }
+		}
+		fmt.Println("--------end of archive iterator-----")
+
+		// fmt.Println("Case reverse iterator")
+		// it1, err = db.RevIterator(prefix)
+		// require.NoError(t, err)
+		// it2, err = compare.RevIterator(prefix)
+		// require.NoError(t, err)
 	}
 	defer func() { it1.Close(); it2.Close() }()
 	for i := 0; func() bool { return it1.Valid() || it2.Valid() }(); func() { it1.Next(); it2.Next() }() {
 		i++
+		fmt.Printf("db key: %s len(%d) txn key: %s len(%d)\n", hex.EncodeToString(it1.Key()), len(it1.Key()), hex.EncodeToString(it2.Key()), len(it2.Key()))
+		fmt.Printf("prefix: %s len(%d) db valid: %t txn valid: %t\n", hex.EncodeToString(prefix), len(prefix), it1.Valid(), it2.Valid())
+		fmt.Printf("db value: %s txn value: %s\n", hex.EncodeToString(it1.Value()), hex.EncodeToString(it2.Value()))
 		require.Equal(t, it1.Valid(), it2.Valid(), fmt.Sprintf("it1.valid=%t\ncompare.valid=%t\nisReverse=%d\nprefix=%s\n", it1.Valid(), it2.Valid(), isReverse, prefix))
 		require.Equal(t, it1.Key(), it2.Key(), fmt.Sprintf("it1.key=%s\ncompare.key=%s\nisReverse=%d\nprefix=%s\n", it1.Key(), it2.Key(), isReverse, prefix))
 		require.Equal(t, it1.Value(), it2.Value(), fmt.Sprintf("it1.value=%s\ncompare.value=%s\nisReverse=%d\nprefix=%s\n", it1.Value(), it2.Value(), isReverse, prefix))

@@ -882,6 +882,44 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("key1"), []byte("v7"), 7, false},
 			},
 		},
+		{
+			name:    "prefix s/ with non-ascii keys",
+			version: 15,
+			prefix:  []byte("s/"),
+			testData: []kvPair{
+				{[]byte("s/\x03\x8e\xb8"), []byte("a6a725"), 13, false},
+				{[]byte("s/\x15\x4e"), []byte("a622c1"), 13, false},
+				{[]byte("s/\xb4\xcf"), []byte(""), 4, true},
+				{[]byte("s/\xc3\x5c"), []byte("59c606"), 5, false},
+				{[]byte("s/\xc3\x5c"), []byte(""), 13, true},
+				{[]byte("s/\xea"), []byte("fb82b2"), 4, false},
+				{[]byte("s/\xea"), []byte(""), 7, true},
+				{[]byte("s/\xea"), []byte(""), 10, true},
+				{[]byte("s/\xc7\xaa\x19"), []byte("c3d8b0"), 9, false},
+			},
+			expected: []kvPair{
+				{[]byte("\x03\x8e\xb8"), []byte("a6a725"), 13, false},
+				{[]byte("\x15\x4e"), []byte("a622c1"), 13, false},
+				{[]byte("\xc7\xaa\x19"), []byte("c3d8b0"), 9, false},
+			},
+		},
+		{
+			name:    "prefix b1721b with non-ascii and multi-byte keys",
+			version: 10,
+			prefix:  []byte{0xb1, 0x72, 0x1b},
+			testData: []kvPair{
+				{[]byte{0xb1, 0x72, 0x1b, 0x0a}, []byte{0xc5, 0x90, 0x4d}, 5, false},
+				{[]byte{0xb1, 0x72, 0x1b, 0x0a, 0x02}, []byte{0x27, 0x5f, 0xab}, 6, false},
+				{[]byte{0xb1, 0x72, 0x1b, 0x39, 0x67, 0x78}, []byte{0xf8, 0x47, 0xed}, 7, false},
+				{[]byte{0xb1, 0x72, 0x1b, 0x40, 0x5f}, []byte{0x40, 0x0a, 0xc7}, 8, false},
+			},
+			expected: []kvPair{
+				{[]byte{0xb1, 0x72, 0x1b, 0x0a}, []byte{0xc5, 0x90, 0x4d}, 5, false},
+				{[]byte{0xb1, 0x72, 0x1b, 0x0a, 0x02}, []byte{0x27, 0x5f, 0xab}, 6, false},
+				{[]byte{0xb1, 0x72, 0x1b, 0x39, 0x67, 0x78}, []byte{0xf8, 0x47, 0xed}, 7, false},
+				{[]byte{0xb1, 0x72, 0x1b, 0x40, 0x5f}, []byte{0x40, 0x0a, 0xc7}, 8, false},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -892,6 +930,9 @@ func TestVersionedIterator(t *testing.T) {
 			// set up test data
 			for _, v := range tt.testData {
 				// create versioned key and store in database
+				if tt.version == 0 {
+					tt.version = 1
+				}
 				vk := makeVersionedKey(v.key, v.version, v.tombstone)
 				err := db.Set(vk, v.value, pebble.Sync)
 				if err != nil {
