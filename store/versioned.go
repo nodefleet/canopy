@@ -22,6 +22,16 @@ const (
 )
 
 // VersionedStore represents a versioned key-value store using Pebble.
+//
+// Key Layout: [UserKey][8-byte Version][1-byte TombstoneMarker]
+// - Versions are stored in big-endian format for lexicographical ordering
+// - Version 0 and math.MaxUint64 are reserved (invalid)
+// - TombstoneMarker: 0x00 = live, 0x01 = deleted
+//
+// The store supports:
+// - MVCC (Multi-Version Concurrency Control) reads at any version ≤ current version
+// - Uncommitted read capability via readUncommitted flag
+// - Atomic batch operations via the underlying Pebble batch
 type VersionedStore struct {
 	reader *pebble.Snapshot
 	// writer is a Pebble batch that allows writing multiple operations atomically.
@@ -64,16 +74,16 @@ func (vs *VersionedStore) Get(key []byte) (value []byte, err lib.ErrorI) {
 }
 
 // Set stores a value for a key at the next version to the underlying batch, note that values are
-// not yet committed and will not be visible to readers until the batch is committed. (or if readCache is enabled)
+// not yet committed and will not be visible to readers until the batch is committed. (or readUncommitted is enabled)
 func (vs *VersionedStore) Set(key, value []byte) lib.ErrorI {
 	return vs.set(key, value, false)
 }
 
 // Delete marks a key as deleted (tombstoned) at the next version in the underlying batch, note that values are
-// not yet committed and will not be visible to readers until the batch is committed. (or if readCache is enabled)
+// not yet committed and will not be visible to readers until the batch is committed. (or readUncommitted is enabled)
 func (vs *VersionedStore) Delete(key []byte) lib.ErrorI {
-	// actual deletion of live key if any. This is to prevent both a live a tombstone marker
-	// existing at the same time
+	// actual deletion of live key if any.
+	// Prevents both a live and a tombstone marker existing at the same time
 	err := vs.writer.Delete(makeVersionedKey(key, vs.nextVersion(), false), nil)
 	if err != nil {
 		return ErrStoreDelete(err)
@@ -175,6 +185,9 @@ func (vs *VersionedStore) Version() uint64 {
 
 // nextVersion returns the next version number for the store.
 func (vs *VersionedStore) nextVersion() uint64 {
+	if vs.version == math.MaxUint64 {
+		return math.MaxUint64
+	}
 	return vs.version + 1
 }
 
@@ -228,7 +241,8 @@ type VersionedIterator struct {
 }
 
 // NewVersionedIterator creates a new VersionedIterator
-func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, reverse, allVersions bool) *VersionedIterator {
+func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, reverse,
+	allVersions bool) *VersionedIterator {
 	vi := &VersionedIterator{
 		iter:        iter,
 		reverse:     reverse,
@@ -248,6 +262,8 @@ func NewVersionedIterator(prefix []byte, iter *pebble.Iterator, version uint64, 
 	}
 
 	if !allVersions {
+		// position iterator at the first valid entry
+		// (handles version filtering and tombstone skipping)
 		vi.Next()
 	}
 
@@ -282,7 +298,10 @@ func (vi *VersionedIterator) next(forward bool) bool {
 			if !vi.moveToNextLogicalKey(forward) {
 				return false
 			}
-			_, version, _, _ := getVersionedKey(vi.iter.Key())
+			_, version, _, err := getVersionedKey(vi.iter.Key())
+			if err != nil {
+				return false
+			}
 			if version <= vi.version {
 				break
 			}
@@ -354,7 +373,7 @@ func (vi *VersionedIterator) prev(forward bool) bool {
 			return false
 		}
 	}
-	return false
+	return true
 }
 
 // Key returns the key of the current key in the iterator.
@@ -374,19 +393,8 @@ func (vi *VersionedIterator) Key() []byte {
 
 // Value returns the value associated with the current key in the iterator.
 func (vi *VersionedIterator) Value() []byte {
-	// valid check
-	if !vi.Valid() {
-		return nil
-	}
-	// retrieve the value from the iterator
-	value := vi.iter.Value()
-	if value == nil {
-		return nil
-	}
-	// copy the value to return it safely
-	valueCopy := make([]byte, len(value))
-	copy(valueCopy, value)
-	return valueCopy
+	// clone the value to return it safely
+	return bytes.Clone(vi.iter.Value())
 }
 
 // Close closes the iterator and releases any resources it holds.
@@ -401,16 +409,7 @@ func (vi *VersionedIterator) seekVersionedKey() (valid bool) {
 	if err != nil {
 		return false
 	}
-	// append the version just above the current version
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, vi.version+1)
-	keyEnd := append(currentKey, buf...)
-	// seek to the highest version <= desired version
-	if !vi.iter.SeekLT(keyEnd) {
-		return false
-	}
-	// exit
-	return true
+	return vi.iter.SeekLT(makeVersionedKey(currentKey, vi.nextVersion(), false))
 }
 
 // moveToNextLogicalKey moves the iterator to the next logical key
@@ -431,6 +430,14 @@ func (vi *VersionedIterator) moveToNextLogicalKey(forward bool) bool {
 		return vi.iter.SeekGE(endPrefix(key))
 	}
 	return vi.iter.SeekLT(key)
+}
+
+// nextVersion returns the next version number for the iterator.
+func (vi *VersionedIterator) nextVersion() uint64 {
+	if vi.version == math.MaxUint64 {
+		return math.MaxUint64
+	}
+	return vi.version + 1
 }
 
 // makeVersionedKey sets a composite key with the current version
