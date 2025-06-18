@@ -96,6 +96,7 @@ func NewStore(path string, metrics *lib.Metrics, log lib.LoggerI) (lib.StoreI, l
 func NewStoreInMemory(log lib.LoggerI) (lib.StoreI, lib.ErrorI) {
 	db, err := pebble.Open("", &pebble.Options{
 		FS:                 vfs.NewMem(),
+		DisableWAL:         true,
 		FormatMajorVersion: pebble.FormatColumnarBlocks,
 	})
 	if err != nil {

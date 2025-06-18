@@ -4,8 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
-	"math"
-	mathrand "math/rand"
+	math "math/rand"
 	"sort"
 	"testing"
 
@@ -42,6 +41,7 @@ func TestFuzz(t *testing.T) {
 	for range 1000 {
 		doRandomOperation(t, store, compareStore, &keys)
 	}
+	db.Close()
 }
 
 func TestFuzzTxn(t *testing.T) {
@@ -63,9 +63,7 @@ func TestFuzzTxn(t *testing.T) {
 }
 
 func doRandomOperation(t *testing.T, db lib.RWStoreI, compare lib.RWStoreI, keys *[]string) {
-	max := math.Max(1, float64(mathrand.Intn(4)))
-	k, v := getRandomBytes(t, int(max)), getRandomBytes(t, 3)
-
+	k, v := getRandomBytes(t, math.Intn(4)), getRandomBytes(t, 3)
 	switch getRandomOperation(t) {
 	case SetTesting:
 		testDBSet(t, db, k, v)
@@ -88,7 +86,7 @@ func doRandomOperation(t *testing.T, db lib.RWStoreI, compare lib.RWStoreI, keys
 		testCompareIterators(t, db, compare, *keys)
 	case WriteTesting:
 		if x, ok := db.(TxnWriterI); ok {
-			switch mathrand.Intn(10) {
+			switch math.Intn(10) {
 			case 0:
 				require.NoError(t, x.Commit())
 			}
@@ -124,14 +122,14 @@ func getRandomBytes(t *testing.T, n int) []byte {
 }
 
 func getRandomOperation(_ *testing.T) TestingOp {
-	return TestingOp(mathrand.Intn(6))
+	return TestingOp(math.Intn(6))
 }
 
 func randomTestKey(_ *testing.T, k []byte, keys []string) []byte {
-	if len(keys) != 0 && mathrand.Intn(100) < 85 {
+	if len(keys) != 0 && math.Intn(100) < 85 {
 		// 85% of time use key already found
 		// else default to the random value
-		k = []byte(keys[mathrand.Intn(len(keys))])
+		k = []byte(keys[math.Intn(len(keys))])
 	}
 	return k
 }
@@ -155,8 +153,8 @@ func testCompareIterators(t *testing.T, db lib.RWStoreI, compare lib.RWStoreI, k
 		it1, it2 lib.IteratorI
 		err      error
 	)
-	isReverse := mathrand.Intn(2)
-	prefix := getRandomBytes(t, mathrand.Intn(4))
+	isReverse := math.Intn(2)
+	prefix := getRandomBytes(t, math.Intn(4))
 	require.NoError(t, err)
 	switch isReverse {
 	case 0:

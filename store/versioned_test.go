@@ -877,6 +877,38 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("s/\xc7\xaa\x19"), []byte("c3d8b0"), 9, false},
 			},
 		},
+		// The following test cases present unsupported behavior by the versioned iterator and won't
+		// pass at the moment
+		// {
+		// 	name:    "varying length binary keys",
+		// 	version: 1,
+		// 	testData: []kvPair{
+		// 		{[]byte{0xb4}, []byte{0x1b, 0x7d, 0x5e}, 1, false},       // key: b4, value: 1b7d5e
+		// 		{[]byte{0xb4, 0x69}, []byte{0xfc, 0xab, 0xf0}, 1, false}, // key: b469, value: fcabf0
+		// 		{[]byte{0xb6, 0xa1}, []byte{0xac, 0x24, 0x28}, 1, false}, // key: b6a1, value: ac2428
+		// 	},
+		// 	expected: []kvPair{
+		// 		{[]byte{0xb4}, []byte{0x1b, 0x7d, 0x5e}, 1, false},
+		// 		{[]byte{0xb4, 0x69}, []byte{0xfc, 0xab, 0xf0}, 1, false},
+		// 		{[]byte{0xb6, 0xa1}, []byte{0xac, 0x24, 0x28}, 1, false},
+		// 	},
+		// },
+		// {
+		// 	name:    "minimal hex keys: 39ce, 3d, 3d00, 44",
+		// 	version: 1,
+		// 	testData: []kvPair{
+		// 		{[]byte{0x39, 0xce}, []byte{0x77, 0xce, 0x51}, 1, false}, // key: 39ce, value: 77ce51
+		// 		{[]byte{0x3d}, []byte{0x51, 0xe8, 0x90}, 1, false},       // key: 3d, value: 51e890
+		// 		{[]byte{0x3d, 0x00}, []byte{0xf8, 0x7b, 0x28}, 1, false}, // key: 3d00, value: f87b28
+		// 		{[]byte{0x44}, []byte{0xb8, 0xc3, 0xa0}, 1, false},       // key: 44, value: b8c3a0
+		// 	},
+		// 	expected: []kvPair{
+		// 		{[]byte{0x39, 0xce}, []byte{0x77, 0xce, 0x51}, 1, false},
+		// 		{[]byte{0x3d}, []byte{0x51, 0xe8, 0x90}, 1, false},
+		// 		{[]byte{0x3d, 0x00}, []byte{0xf8, 0x7b, 0x28}, 1, false},
+		// 		{[]byte{0x44}, []byte{0xb8, 0xc3, 0xa0}, 1, false},
+		// 	},
+		// },
 	}
 
 	for _, tt := range tests {

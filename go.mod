@@ -8,7 +8,6 @@ require (
 	filippo.io/edwards25519 v1.1.0
 	github.com/alecthomas/units v0.0.0-20231202071711-9a357b53e9c9
 	github.com/cenkalti/backoff/v4 v4.3.0
-	github.com/cockroachdb/pebble v1.1.5
 	github.com/cockroachdb/pebble/v2 v2.0.5
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1
 	github.com/dgraph-io/badger/v4 v4.7.0
