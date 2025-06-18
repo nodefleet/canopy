@@ -11,8 +11,7 @@ import (
 )
 
 func TestStoreSetGetDelete(t *testing.T) {
-	store, _, cleanup := testStore(t)
-	defer cleanup()
+	store, _, _ := testStore(t)
 	key, val := []byte("key"), []byte("val")
 	require.NoError(t, store.Set(key, val))
 	gotVal, err := store.Get(key)

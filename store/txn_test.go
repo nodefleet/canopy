@@ -8,17 +8,22 @@ import (
 	"testing"
 
 	"github.com/canopy-network/canopy/lib"
-	"github.com/dgraph-io/badger/v4"
+	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble/v2/vfs"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newTxn(t *testing.T, prefix []byte) (*Txn, *badger.DB, *badger.WriteBatch) {
-	db, err := badger.OpenManaged(badger.DefaultOptions("").WithInMemory(true).WithLoggingLevel(badger.ERROR))
+func newTxn(t *testing.T, prefix []byte) (*Txn, *pebble.DB, *pebble.Batch) {
+	db, err := pebble.Open("", &pebble.Options{
+		FS:                 vfs.NewMem(),
+		FormatMajorVersion: pebble.FormatColumnarBlocks,
+	})
+	assert.NoError(t, err)
+	batch := db.NewIndexedBatch()
+	vs, err := NewVersionedStore(batch, batch, 0, true)
 	require.NoError(t, err)
-	var version uint64 = 1
-	reader := db.NewTransactionAt(version, false)
-	writer := db.NewWriteBatchAt(version)
-	return NewBadgerTxn(reader, writer, prefix, true, lib.NewDefaultLogger()), db, writer
+	return NewTxn(vs, vs, prefix, true, lib.NewDefaultLogger()), db, batch
 }
 
 func TestNestedTxn(t *testing.T) {
@@ -61,8 +66,8 @@ func TestTxnWriteSetGet(t *testing.T) {
 	require.NoError(t, dbErr)
 	require.Nil(t, dbVal)
 	require.NoError(t, test.Commit())
-	require.NoError(t, writer.Flush())
-	// test get from reader after write()
+	require.NoError(t, writer.Commit(pebble.Sync))
+	// test get from txn at greater version after write()
 	require.Len(t, test.cache.ops, 0)
 	val, err = test.Get(key)
 	require.NoError(t, err)
@@ -84,7 +89,7 @@ func TestTxnWriteDelete(t *testing.T) {
 	require.Nil(t, dbVal)
 	// test get value from reader after write()
 	require.NoError(t, test.Commit())
-	require.NoError(t, writer.Flush())
+	require.NoError(t, writer.Commit(pebble.Sync))
 	dbVal, dbErr = test.reader.Get([]byte("1/a"))
 	require.NoError(t, dbErr)
 	require.Nil(t, dbVal)
@@ -186,9 +191,9 @@ func TestTxnIterateMixed(t *testing.T) {
 	// first write to the memory cache and flush it
 	bulkSetKV(t, test, "1/", "f", "e", "d")
 	require.NoError(t, test.Commit())
-	require.NoError(t, writer.Flush())
+	require.NoError(t, writer.Commit(pebble.Sync))
 	// now add new entries to the memory cache.
-	// Since the reader and writer are on the same version,
+	// Since the readUncommitted is enabled,
 	// it's possible to read the previously flushed data
 	// without creating a new transaction
 	bulkSetKV(t, test, "1/", "i", "h", "g")
@@ -262,7 +267,7 @@ func TestTxnIterateMixedWithDeletedValues(t *testing.T) {
 	// first write to the db writer and flush it
 	bulkSetKV(t, test, "1/", "f", "e", "d")
 	require.NoError(t, test.Commit())
-	require.NoError(t, writer.Flush())
+	require.NoError(t, writer.Commit(pebble.Sync))
 	// now add new entries to the memory cache.
 	// Since the reader and writer are on the same version,
 	// it's possible to read the previously flushed data
@@ -313,7 +318,7 @@ func TestIteratorBasic(t *testing.T) {
 	expectedValsReverse := []string{"h", "g", "f", "e", "d", "c", "b", "a"}
 	bulkSetKV(t, test, "", expectedVals...)
 	require.NoError(t, test.Commit())
-	require.NoError(t, writer.Flush())
+	require.NoError(t, writer.Commit(pebble.Sync))
 	it, err := test.Iterator(nil)
 	require.NoError(t, err)
 	defer it.Close()

@@ -3,13 +3,15 @@ package store
 import (
 	"bytes"
 	"fmt"
-	"github.com/canopy-network/canopy/lib/crypto"
 	"math/rand"
 	"strconv"
 	"testing"
 
+	"github.com/canopy-network/canopy/lib/crypto"
+	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble/v2/vfs"
+
 	"github.com/canopy-network/canopy/lib"
-	"github.com/dgraph-io/badger/v4"
 	"github.com/stretchr/testify/require"
 )
 
@@ -2015,12 +2017,14 @@ func FuzzKeyDecodeEncode(f *testing.F) {
 
 func NewTestSMT(t *testing.T, preset *NodeList, root []byte, keyBitSize int) (*SMT, *Txn) {
 	// create a new memory store to work with
-	db, err := badger.OpenManaged(badger.DefaultOptions("").WithInMemory(true).WithLoggingLevel(badger.ERROR))
+	db, err := pebble.Open("", &pebble.Options{
+		FS:                 vfs.NewMem(),
+		FormatMajorVersion: pebble.FormatColumnarBlocks,
+	})
 	require.NoError(t, err)
-	// make a writable reader that reads from the last height
-	reader := db.NewTransactionAt(1, true)
-	writer := db.NewWriteBatchAt(1)
-	memStore := NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), false, lib.NewDefaultLogger())
+	vs, err := NewVersionedStore(db.NewSnapshot(), db.NewIndexedBatch(), 1, true)
+	require.NoError(t, err)
+	memStore := NewTxn(vs, vs, []byte(stateCommitmentPrefix), false, lib.NewDefaultLogger())
 	// if there's no preset - use the default 3 nodes
 	if preset == nil {
 		if root != nil {
