@@ -185,8 +185,12 @@ func (vs *VersionedStore) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.Err
 }
 
 // Discard closes the reader of the versioned store.
+// For *pebble.DB. This is a noop.
 func (vs *VersionedStore) Discard() {
-	vs.once.Do(func() { vs.reader.Close() })
+	if _, ok := vs.reader.(*pebble.DB); ok {
+		return
+	}
+	vs.reader.Close()
 }
 
 // Cancel closes the writer of the versioned store.

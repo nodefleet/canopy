@@ -110,7 +110,7 @@ func NewStoreWithDB(db *pebble.DB, metrics *lib.Metrics, log lib.LoggerI, write 
 	// get the latest CommitID (height and hash)
 	id := getLatestCommitID(db, log)
 	// create a new versioned store at the latest height
-	vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), id.Height, false)
+	vs, err := NewVersionedStore(db, db.NewBatch(), id.Height, false)
 	if err != nil {
 		return nil, ErrOpenDB(err)
 	}
@@ -132,7 +132,7 @@ func NewStoreWithDB(db *pebble.DB, metrics *lib.Metrics, log lib.LoggerI, write 
 // NewReadOnly() returns a store without a writer - meant for historical read only queries
 func (s *Store) NewReadOnly(queryVersion uint64) (lib.StoreI, lib.ErrorI) {
 	// create a new versioned store at the specified version
-	vs, err := NewVersionedStore(s.db.NewSnapshot(), s.db.NewBatch(), queryVersion, false)
+	vs, err := NewVersionedStore(s.db, s.db.NewBatch(), queryVersion, false)
 	if err != nil {
 		return nil, ErrOpenDB(err)
 	}
@@ -159,7 +159,7 @@ func (s *Store) NewReadOnly(queryVersion uint64) (lib.StoreI, lib.ErrorI) {
 // this can be useful for having two simultaneous copies of the store
 // ex: Mempool state and FSM state
 func (s *Store) Copy() (lib.StoreI, lib.ErrorI) {
-	vs, err := NewVersionedStore(s.db.NewSnapshot(), s.db.NewBatch(), s.version, false)
+	vs, err := NewVersionedStore(s.db, s.db.NewBatch(), s.version, false)
 	if err != nil {
 		return nil, ErrOpenDB(err)
 	}
@@ -347,7 +347,7 @@ func (s *Store) Close() lib.ErrorI {
 // resetWriter() closes the writer, and creates a new writer, and sets the writer to the 3 main abstractions
 func (s *Store) resetWriter() {
 	// TODO: handle error
-	newVS, _ := NewVersionedStore(s.db.NewSnapshot(), s.db.NewBatch(), s.version, false)
+	newVS, _ := NewVersionedStore(s.db, s.db.NewBatch(), s.version, false)
 	// create all new transaction-dependent objects
 	newLSS := NewTxn(newVS, newVS, []byte(latestStatePrefix), true, s.log)
 	newSC := NewDefaultSMT(NewTxn(newVS, newVS, []byte(stateCommitmentPrefix), false, s.log))
@@ -405,7 +405,7 @@ func (s *Store) setCommitID(version uint64, root []byte) lib.ErrorI {
 
 // getLatestCommitID() retrieves the latest CommitID from the database
 func getLatestCommitID(db *pebble.DB, log lib.LoggerI) (id *lib.CommitID) {
-	vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), math.MaxUint64, false)
+	vs, err := NewVersionedStore(db, db.NewBatch(), math.MaxUint64, false)
 	if err != nil {
 		log.Fatalf("getLatestCommitID() failed with err: %s", err.Error())
 	}
