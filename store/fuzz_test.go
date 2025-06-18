@@ -9,7 +9,8 @@ import (
 	"testing"
 
 	"github.com/canopy-network/canopy/lib"
-	"github.com/dgraph-io/badger/v4"
+	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble/v2/vfs"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,26 +26,36 @@ const (
 )
 
 func TestFuzz(t *testing.T) {
-	db, err := badger.OpenManaged(badger.DefaultOptions("").
-		WithInMemory(true).WithLoggingLevel(badger.ERROR))
+	db, err := pebble.Open("", &pebble.Options{
+		FS:                 vfs.NewMem(),
+		FormatMajorVersion: pebble.FormatColumnarBlocks,
+	})
+	require.NoError(t, err)
+	vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 1, false)
 	require.NoError(t, err)
 	store, _, cleanup := testStore(t)
 	defer cleanup()
 	defer db.Close()
 	keys := make([]string, 0)
-	compareStore := NewBadgerTxn(db.NewTransactionAt(1, true), db.NewWriteBatchAt(1), []byte(latestStatePrefix), true, nil)
+	compareStore := NewTxn(vs, vs, []byte(latestStatePrefix), true, nil)
 	for range 1000 {
 		doRandomOperation(t, store, compareStore, &keys)
 	}
+	db.Close()
 }
 
 func TestFuzzTxn(t *testing.T) {
-	db, err := badger.OpenManaged(badger.DefaultOptions("").
-		WithInMemory(true).WithLoggingLevel(badger.ERROR))
+	db, err := pebble.Open("", &pebble.Options{
+		FS:                 vfs.NewMem(),
+		FormatMajorVersion: pebble.FormatColumnarBlocks,
+	})
 	require.NoError(t, err)
 	store, err := NewStoreInMemory(lib.NewDefaultLogger())
+	vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), 1, false)
+	require.NoError(t, err)
+
 	keys := make([]string, 0)
-	compareStore := NewBadgerTxn(db.NewTransactionAt(1, true), db.NewWriteBatchAt(1), []byte(latestStatePrefix), true, nil)
+	compareStore := NewTxn(vs, vs, []byte(latestStatePrefix), true, nil)
 	for range 1000 {
 		doRandomOperation(t, store, compareStore, &keys)
 	}
@@ -77,7 +88,7 @@ func doRandomOperation(t *testing.T, db lib.RWStoreI, compare lib.RWStoreI, keys
 		if x, ok := db.(TxnWriterI); ok {
 			switch math.Intn(10) {
 			case 0:
-				require.NoError(t, x.Write())
+				require.NoError(t, x.Commit())
 			}
 		}
 	case CommitTesting:

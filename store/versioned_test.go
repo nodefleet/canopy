@@ -229,10 +229,10 @@ func TestVersionedStoreSet(t *testing.T) {
 			if tt.readUncommitted {
 				batch = db.NewIndexedBatch()
 			}
-			vs, err := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
-			require.NoError(t, err)
+			vs, libErr := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			require.NoError(t, libErr)
 			// apply the store state setup function
-			err = tt.operations(t, vs)
+			err := tt.operations(t, vs)
 			if tt.expectedError != nil {
 				assert.NotNil(t, err)
 				assert.Equal(t, tt.expectedError, err)
@@ -291,10 +291,10 @@ func TestVersionedStoreDelete(t *testing.T) {
 			if tt.readUncommitted {
 				batch = db.NewIndexedBatch()
 			}
-			vs, err := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
-			require.NoError(t, err)
+			vs, libErr := NewVersionedStore(db.NewSnapshot(), batch, tt.version, tt.readUncommitted)
+			require.NoError(t, libErr)
 			// apply the store state setup function
-			err = tt.operations(t, vs)
+			err := tt.operations(t, vs)
 			if tt.expectedError != nil {
 				assert.NotNil(t, err)
 				assert.Equal(t, tt.expectedError, err)
@@ -436,23 +436,6 @@ func TestVersionedIterator(t *testing.T) {
 		value     []byte
 		version   uint64
 		tombstone bool
-	}
-	// helper to create a versioned iterator for testing
-	createIterator := func(t *testing.T, prefix []byte, vs *VersionedStore,
-		reverse, allVersions bool) *VersionedIterator {
-		if reverse {
-			vi, err := vs.RevIterator(prefix)
-			require.NoError(t, err)
-			return vi.(*VersionedIterator)
-		}
-		if allVersions {
-			vi, err := vs.ArchiveIterator(prefix)
-			require.NoError(t, err)
-			return vi.(*VersionedIterator)
-		}
-		vi, err := vs.Iterator(prefix)
-		require.NoError(t, err)
-		return vi.(*VersionedIterator)
 	}
 	// test cases
 	tests := []struct {
@@ -873,6 +856,59 @@ func TestVersionedIterator(t *testing.T) {
 				{[]byte("key1"), []byte("v7"), 7, false},
 			},
 		},
+		{
+			name:    "prefix s/ with non-ascii keys",
+			version: 15,
+			prefix:  []byte("s/"),
+			testData: []kvPair{
+				{[]byte("s/\x03\x8e\xb8"), []byte("a6a725"), 13, false},
+				{[]byte("s/\x15\x4e"), []byte("a622c1"), 13, false},
+				{[]byte("s/\xb4\xcf"), []byte(""), 4, true},
+				{[]byte("s/\xc3\x5c"), []byte("59c606"), 5, false},
+				{[]byte("s/\xc3\x5c"), []byte(""), 13, true},
+				{[]byte("s/\xea"), []byte("fb82b2"), 4, false},
+				{[]byte("s/\xea"), []byte(""), 7, true},
+				{[]byte("s/\xea"), []byte(""), 10, true},
+				{[]byte("s/\xc7\xaa\x19"), []byte("c3d8b0"), 9, false},
+			},
+			expected: []kvPair{
+				{[]byte("s/\x03\x8e\xb8"), []byte("a6a725"), 13, false},
+				{[]byte("s/\x15\x4e"), []byte("a622c1"), 13, false},
+				{[]byte("s/\xc7\xaa\x19"), []byte("c3d8b0"), 9, false},
+			},
+		},
+		// The following test cases present unsupported behavior by the versioned iterator and won't
+		// pass at the moment
+		// {
+		// 	name:    "varying length binary keys",
+		// 	version: 1,
+		// 	testData: []kvPair{
+		// 		{[]byte{0xb4}, []byte{0x1b, 0x7d, 0x5e}, 1, false},       // key: b4, value: 1b7d5e
+		// 		{[]byte{0xb4, 0x69}, []byte{0xfc, 0xab, 0xf0}, 1, false}, // key: b469, value: fcabf0
+		// 		{[]byte{0xb6, 0xa1}, []byte{0xac, 0x24, 0x28}, 1, false}, // key: b6a1, value: ac2428
+		// 	},
+		// 	expected: []kvPair{
+		// 		{[]byte{0xb4}, []byte{0x1b, 0x7d, 0x5e}, 1, false},
+		// 		{[]byte{0xb4, 0x69}, []byte{0xfc, 0xab, 0xf0}, 1, false},
+		// 		{[]byte{0xb6, 0xa1}, []byte{0xac, 0x24, 0x28}, 1, false},
+		// 	},
+		// },
+		// {
+		// 	name:    "minimal hex keys: 39ce, 3d, 3d00, 44",
+		// 	version: 1,
+		// 	testData: []kvPair{
+		// 		{[]byte{0x39, 0xce}, []byte{0x77, 0xce, 0x51}, 1, false}, // key: 39ce, value: 77ce51
+		// 		{[]byte{0x3d}, []byte{0x51, 0xe8, 0x90}, 1, false},       // key: 3d, value: 51e890
+		// 		{[]byte{0x3d, 0x00}, []byte{0xf8, 0x7b, 0x28}, 1, false}, // key: 3d00, value: f87b28
+		// 		{[]byte{0x44}, []byte{0xb8, 0xc3, 0xa0}, 1, false},       // key: 44, value: b8c3a0
+		// 	},
+		// 	expected: []kvPair{
+		// 		{[]byte{0x39, 0xce}, []byte{0x77, 0xce, 0x51}, 1, false},
+		// 		{[]byte{0x3d}, []byte{0x51, 0xe8, 0x90}, 1, false},
+		// 		{[]byte{0x3d, 0x00}, []byte{0xf8, 0x7b, 0x28}, 1, false},
+		// 		{[]byte{0x44}, []byte{0xb8, 0xc3, 0xa0}, 1, false},
+		// 	},
+		// },
 	}
 
 	for _, tt := range tests {
@@ -883,6 +919,9 @@ func TestVersionedIterator(t *testing.T) {
 			// set up test data
 			for _, v := range tt.testData {
 				// create versioned key and store in database
+				if tt.version == 0 {
+					tt.version = 1
+				}
 				vk := makeVersionedKey(v.key, v.version, v.tombstone)
 				err := db.Set(vk, v.value, pebble.Sync)
 				if err != nil {
@@ -893,7 +932,9 @@ func TestVersionedIterator(t *testing.T) {
 			vs, err := NewVersionedStore(db.NewSnapshot(), db.NewBatch(), tt.version, false)
 			require.NoError(t, err)
 			// create iterator
-			iter := createIterator(t, []byte(tt.prefix), vs, tt.reverse, tt.allVersions)
+			testIter, err := vs.NewIterator([]byte(tt.prefix), tt.reverse, tt.allVersions)
+			require.NoError(t, err)
+			iter := testIter.(*VersionedIterator)
 			defer iter.Close()
 			// validate the iterator
 			i := 0

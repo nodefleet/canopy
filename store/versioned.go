@@ -33,7 +33,7 @@ const (
 // - Uncommitted read capability via readUncommitted flag
 // - Atomic batch operations via the underlying Pebble batch
 type VersionedStore struct {
-	reader *pebble.Snapshot
+	reader pebble.Reader
 	// writer is a Pebble batch that allows writing multiple operations atomically.
 	// a pebble.NewIndexedBatch() is needed in order to read uncommitted keys
 	writer          *pebble.Batch
@@ -42,19 +42,21 @@ type VersionedStore struct {
 	// whether the writer has been committed. Prevents PebbleDB panics on
 	// committed batches by returning an error instead.
 	committed atomic.Bool
+	once      sync.Once
 }
 
 // NewVersionedStore creates a new VersionedStore with the given database and initial version.
-func NewVersionedStore(reader *pebble.Snapshot, writer *pebble.Batch, version uint64, readUncommitted bool) (*VersionedStore, error) {
-	// minimum version is 1 and maximum version is math.MaxUint64 - 1 due to lexicographical ordering
-	if version == 0 || version == math.MaxUint64 {
-		return nil, ErrInvalidVersion()
+func NewVersionedStore(reader pebble.Reader, writer *pebble.Batch, version uint64, readUncommitted bool) (*VersionedStore, lib.ErrorI) {
+	// maximum version is math.MaxUint64 - 1 due to basic type limit
+	if version == math.MaxUint64 {
+		version = math.MaxUint64 - 1
 	}
 	return &VersionedStore{
 		reader:          reader,
 		writer:          writer,
 		version:         version,
 		readUncommitted: readUncommitted,
+		once:            sync.Once{},
 	}, nil
 }
 
@@ -102,8 +104,12 @@ func (vs *VersionedStore) get(key []byte, reader pebble.Reader, version uint64) 
 	if !bytes.Equal(key, logicalKey) {
 		return
 	}
-	// exit
-	return iter.Value(), nil
+	// get the value and check for errors
+	value, valErr := iter.ValueAndErr()
+	if valErr != nil {
+		return nil, ErrStoreGet(valErr)
+	}
+	return value, nil
 }
 
 // Set stores a value for a key at the next version to the underlying batch, note that values are
@@ -144,7 +150,7 @@ func (vs *VersionedStore) Commit() lib.ErrorI {
 		return ErrStoreCommitted()
 	}
 	// commit the underlying batch
-	if err := vs.writer.Commit(pebble.Sync); err != nil {
+	if err := vs.writer.Commit(pebble.NoSync); err != nil {
 		return ErrCommitDB(err)
 	}
 	return nil
@@ -156,6 +162,11 @@ func (vs *VersionedStore) nextVersion() uint64 {
 		return math.MaxUint64
 	}
 	return vs.version + 1
+}
+
+// NewIterator creates a new iterator for the versioned store
+func (vs *VersionedStore) NewIterator(prefix []byte, reverse, allVersions bool) (lib.IteratorI, lib.ErrorI) {
+	return vs.iterator(prefix, reverse, allVersions)
 }
 
 // Iterator creates a new iterator that iterates over all the keys in the store up to the current version.
@@ -173,12 +184,27 @@ func (vs *VersionedStore) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.Err
 	return vs.iterator(prefix, false, true)
 }
 
+// Discard closes the reader of the versioned store.
+func (vs *VersionedStore) Discard() {
+	vs.once.Do(func() { vs.reader.Close() })
+}
+
+// Cancel closes the writer of the versioned store.
+func (vs *VersionedStore) Cancel() {
+	// close the writer
+	vs.writer.Close()
+	// mark the store as committed
+	vs.committed.Store(true)
+}
+
 // iterator creates a new iterator for the versioned store.
 func (vs *VersionedStore) iterator(prefix []byte, reverse bool, allVersions bool) (lib.IteratorI, lib.ErrorI) {
 	reader := (pebble.Reader)(vs.reader)
+	version := vs.version
 	// if readUncommitted is enabled use the batch to read
 	if vs.readUncommitted && !vs.committed.Load() {
 		reader = vs.writer
+		version = vs.nextVersion()
 	}
 	it, err := reader.NewIter(&pebble.IterOptions{
 		LowerBound: prefix,
@@ -187,7 +213,7 @@ func (vs *VersionedStore) iterator(prefix []byte, reverse bool, allVersions bool
 	if err != nil {
 		return nil, ErrStoreIterator(err)
 	}
-	return NewVersionedIterator(prefix, it, vs.version, reverse, allVersions), nil
+	return NewVersionedIterator(prefix, it, version, reverse, allVersions), nil
 }
 
 // VersionedIterator CODE BELOW
