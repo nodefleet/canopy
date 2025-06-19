@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/canopy-network/canopy/lib/crypto"
+	"math/rand"
 	"strconv"
 	"testing"
 
@@ -11,6 +12,51 @@ import (
 	"github.com/dgraph-io/badger/v4"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFuzzMultiSet(t *testing.T) {
+	iterations := 1000
+	// create a new SMT
+	smt1, memStore := NewTestSMT(t, nil, nil, 160)
+	// close the store when done
+	defer memStore.Close()
+	// create a compare SMT
+	smt2, memStore2 := NewTestSMT(t, nil, nil, 160)
+	// close the store when done
+	defer memStore2.Close()
+	var keys [][]byte
+	for i := 0; i < iterations; i++ {
+		// load 32 random bytes
+		random := make([]byte, 32)
+		_, err := rand.Read(random)
+		require.NoError(t, err)
+		// 50% of the time do a set
+		if rand.Intn(2) == 0 {
+			keys = append(keys, random)
+			require.NoError(t, smt1.Set(random, random))
+			require.NoError(t, smt2.Set(random, random))
+		} else {
+			toDelete := random
+			if rand.Intn(2) == 0 {
+				if len(keys) != 0 {
+					// choose a random key
+					idx := rand.Intn(len(keys))
+					toDelete = keys[idx]
+					// remove it from the keys slice
+					keys = append(keys[:idx], keys[idx+1:]...)
+				}
+			}
+			// 50% of the time do a delete
+			require.NoError(t, smt1.Delete(toDelete))
+			require.NoError(t, smt2.Delete(toDelete))
+		}
+		// for smt 2 commit everytime
+		require.NoError(t, smt2.Commit())
+	}
+	// commit smt 1
+	require.NoError(t, smt1.Commit())
+	// compare roots between the two smts
+	require.Equal(t, smt1.Root(), smt2.Root())
+}
 
 func TestSet(t *testing.T) {
 	tests := []struct {
@@ -486,6 +532,8 @@ func TestSet(t *testing.T) {
 				defer memStore.Close()
 				// execute the traversal code
 				require.NoError(t, smt.Set(test.targetKey, test.targetValue))
+				// commit the set
+				require.NoError(t, smt.Commit())
 				// create an iterator to check out the values of the store
 				it, err := memStore.Iterator(nil)
 				require.NoError(t, err)
@@ -511,6 +559,7 @@ func TestSet(t *testing.T) {
 		})
 	}
 }
+
 func TestDelete(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -706,7 +755,7 @@ func TestDelete(t *testing.T) {
 		},
 		{
 			name: "delete (not exists) and target at 011",
-			detail: `BEFORE:   root     *011* <- target not exists
+			detail: `BEFORE:       root     *011* <- target not exists
 								  /     \
 							    0        10
 							  /   \     /  \
@@ -737,19 +786,26 @@ func TestDelete(t *testing.T) {
 					newTestNode("0", nil, "001", "010"),
 					newTestNode("001", nil, "", ""), // leaf
 					newTestNode("10", nil, "100", "101"),
-					newTestNode("010", nil, "", ""),    // leaf
-					newTestNode("100", nil, "", ""),    // leaf
-					newTestNode("101", nil, "", ""),    // leaf
-					newTestNode("110", nil, "0", "10"), // root
+					newTestNode("010", nil, "", ""), // leaf
+					newTestNode("100", nil, "", ""), // leaf
+					newTestNode("101", nil, "", ""), // leaf
+					newTestNode("110", func() []byte {
+						// NOTE: nothing was updated - but rehash() is executed regardless so values must be updated
+						// NOTE: there's no values in the nodes so just use keys
+						in001, in010 := keyBytesFromStr("001"), keyBytesFromStr("010")
+						in0, in10 := append(keyBytesFromStr("0"), crypto.Hash(append(in001, in010...))...), keyBytesFromStr("10")
+						// root value
+						return crypto.Hash(append(in0, in10...))
+					}(), "0", "10"), // root
 				},
 			},
 		},
 		{
 			name: "delete (not exists) and target at 1101",
-			detail: `BEFORE:   root     *1101* <- target not exists
+			detail: `BEFORE:       root     *1101* <- target not exists
 								  /    \
-							    0000    1
-	                       		  /   \
+							    0000     1
+	                       		       /   \
 									1000   111
 										  /   \
 									    1110  1111
@@ -782,9 +838,16 @@ func TestDelete(t *testing.T) {
 					newTestNode("1", nil, "1000", "111"),
 					newTestNode("111", nil, "1110", "1111"), // leaf
 					newTestNode("1000", nil, "", ""),        // leaf
-					newTestNode("1001", nil, "0000", "1"),   // root
-					newTestNode("1110", nil, "", ""),        // leaf
-					newTestNode("1111", nil, "", ""),        // leaf
+					newTestNode("1001", func() []byte {
+						// NOTE: nothing was updated - but rehash() is executed regardless so values must be updated
+						// NOTE: there's no values in the nodes so just use keys
+						in1000, in111 := keyBytesFromStr("1000"), keyBytesFromStr("111")
+						in0000, in1 := keyBytesFromStr("0000"), append(keyBytesFromStr("1"), crypto.Hash(append(in1000, in111...))...)
+						// root value
+						return crypto.Hash(append(in0000, in1...))
+					}(), "0000", "1"), // root
+					newTestNode("1110", nil, "", ""), // leaf
+					newTestNode("1111", nil, "", ""), // leaf
 				},
 			},
 		},
@@ -798,6 +861,8 @@ func TestDelete(t *testing.T) {
 				defer memStore.Close()
 				// execute the traversal code
 				require.NoError(t, smt.Delete(test.targetKey))
+				// commit the result
+				require.NoError(t, smt.Commit())
 				// create an iterator to check out the values of the store
 				it, err := memStore.Iterator(nil)
 				require.NoError(t, err)
@@ -1787,6 +1852,7 @@ func TestStoreProof(t *testing.T) {
 				require.NoError(t, smt.setNode(n))
 				// set the target node as the node just created
 				smt.target = n
+				smt.reset()
 				require.NoError(t, smt.traverse())
 				// traverse to the node that was just set
 				require.Equal(t, n, smt.target)
@@ -1807,6 +1873,111 @@ func TestStoreProof(t *testing.T) {
 			// validate results
 			require.NoError(t, err)
 			require.Equal(t, test.valid, valid)
+		})
+	}
+}
+
+func TestKeyCmp(t *testing.T) {
+	tests := []struct {
+		name     string
+		k1       *key
+		k2       *key
+		expected int
+	}{
+		{
+			name: "equal",
+			k1: &key{
+				key: []byte{255, 0, 2},
+			},
+			k2: &key{
+				key: []byte{255, 0, 2},
+			},
+			expected: 0, // equal
+		},
+		{
+			name: "more left padding k1 but equal",
+			k1: &key{
+				key: []byte{255, 0, 3},
+			},
+			k2: &key{
+				key: []byte{255, 0, 2},
+			},
+			expected: 0, // equal
+		},
+		{
+			name: "equal full bytes",
+			k1: &key{
+				key: []byte{255, 255, 255, 0},
+				//mostSigBytes: []byte{0b11111110},
+				//leastSigBits: []int{0, 0, 0},
+			},
+			k2: &key{
+				key: []byte{255, 255, 255, 0},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+			},
+			expected: 0, // equal
+		},
+		{
+			name: "longer k1 but greater",
+			k1: &key{
+				key: []byte{0b11111111, 0, 2},
+				//mostSigBytes: []byte{0b11111111},
+				//leastSigBits: []int{0, 0, 0},
+			},
+			k2: &key{
+				key: []byte{0b11111110, 0},
+				//mostSigBytes: nil,
+				//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 0},
+			},
+			expected: 1, // greater
+		},
+		{
+			name: "longer k1 with full bytes but equal",
+			k1: &key{
+				key: []byte{255, 255, 0, 2},
+				//mostSigBytes: []byte{255, 0b11111111},
+				//leastSigBits: []int{0, 0, 0},
+			},
+			k2: &key{
+				key: []byte{255, 255, 0},
+				//mostSigBytes: []byte{255},
+				//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+			},
+			expected: 0, // equal
+		},
+		{
+			name: "longer k1 with full bytes but less",
+			k1: &key{
+				key: []byte{255, 0b11111110, 0, 2},
+				//mostSigBytes: []byte{255,0b11111110},
+				//leastSigBits: []int{0, 0, 0},
+			},
+			k2: &key{
+				key: []byte{255, 0b11111111, 0},
+				//mostSigBytes: []byte{255},
+				//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+			},
+			expected: -1, // less
+		},
+		{
+			name: "longer k1 with full bytes but greater",
+			k1: &key{
+				key: []byte{255, 0b11111111, 0, 2},
+				//mostSigBytes: []byte{255,0b11111111},
+				//leastSigBits: []int{0, 0, 0},
+			},
+			k2: &key{
+				key: []byte{254, 0b11111111, 0},
+				//mostSigBytes: []byte{254},
+				//leastSigBits: []int{1, 1, 1, 1, 1, 1, 1, 1},
+			},
+			expected: 1, // greater
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, test.k1.cmp(test.k2))
 		})
 	}
 }
@@ -1844,8 +2015,7 @@ func FuzzKeyDecodeEncode(f *testing.F) {
 
 func NewTestSMT(t *testing.T, preset *NodeList, root []byte, keyBitSize int) (*SMT, *Txn) {
 	// create a new memory store to work with
-	db, err := badger.OpenManaged(badger.DefaultOptions("").
-		WithInMemory(true).WithLoggingLevel(badger.ERROR))
+	db, err := badger.OpenManaged(badger.DefaultOptions("").WithInMemory(true).WithLoggingLevel(badger.ERROR))
 	require.NoError(t, err)
 	// make a writable reader that reads from the last height
 	reader := db.NewTransactionAt(1, true)
@@ -1862,8 +2032,9 @@ func NewTestSMT(t *testing.T, preset *NodeList, root []byte, keyBitSize int) (*S
 	smt := &SMT{
 		store:        memStore,
 		keyBitLength: keyBitSize,
-		nodeCache:    make(map[uint64]*node, MaxCacheSize),
+		nodeCache:    make(map[string]*node, MaxCacheSize),
 		OpData:       OpData{},
+		unsortedOps:  make(map[string]*node),
 	}
 	// update root
 	smt.root = preset.Nodes[0]
@@ -1872,6 +2043,8 @@ func NewTestSMT(t *testing.T, preset *NodeList, root []byte, keyBitSize int) (*S
 		// set the node in the dbz
 		require.NoError(t, smt.setNode(n))
 	}
+	// prepare for traversal
+	smt.reset()
 	return smt, memStore
 }
 
@@ -1913,9 +2086,6 @@ func keyBytesFromStr(str string) []byte {
 		val, _ := strconv.ParseUint(str, 2, 8)
 		// convert the bits to bytes now producing the key
 		byts = []byte{byte(val), byte(leftPadding)}
-		for i := 0; i < len(byts)-1; i++ {
-			fmt.Printf("%08b ", byts[i])
-		}
 	}
 	// return the key bytes
 	return byts

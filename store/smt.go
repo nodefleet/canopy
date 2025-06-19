@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"math/bits"
+	"sort"
 
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
@@ -145,7 +146,11 @@ type SMT struct {
 	// keyBitLength: the depth of the tree, once set it cannot be changed for a protocol
 	keyBitLength int
 	// nodeCache: an efficient in-memory cache to avoid marshalling and unmarshalling recent nodes
-	nodeCache map[uint64]*node
+	nodeCache map[string]*node
+	// operations: a list of deferred operations to execute
+	operations []*node
+	// unsorted_ops: a list of operations that aren't yet sorted
+	unsortedOps map[string]*node
 	// OpData: data for each operation
 	OpData
 
@@ -159,6 +164,8 @@ type node struct {
 	Key *key
 	// Node: is the structure persisted on disk under the above key bytes
 	lib.Node
+	// delete: indicates if the deferred operation for the node is 'set or delete'
+	delete bool
 }
 
 // OpData: data for each operation (set, delete)
@@ -197,7 +204,7 @@ func NewSMT(rootKey []byte, keyBitLen int, store lib.RWStoreI) (smt *SMT) {
 		store:        store,
 		keyBitLength: keyBitLen,
 		statsChan:    make(chan SMTStat),
-		nodeCache:    make(map[uint64]*node, MaxCacheSize),
+		nodeCache:    make(map[string]*node, MaxCacheSize),
 	}
 	go smt.logData()
 	// ensure the root key is the proper length based on the bit count
@@ -211,6 +218,10 @@ func NewSMT(rootKey []byte, keyBitLen int, store lib.RWStoreI) (smt *SMT) {
 	if smt.root.LeftChildKey == nil {
 		smt.initializeTree(rKey)
 	}
+	// initialize the operations list
+	smt.unsortedOps = make(map[string]*node)
+	// prepare for traversal
+	smt.reset()
 	return
 }
 
@@ -218,7 +229,7 @@ func NewSMT(rootKey []byte, keyBitLen int, store lib.RWStoreI) (smt *SMT) {
 func (s *SMT) Root() []byte { return bytes.Clone(s.root.Value) }
 
 // Set: insert or update a target
-func (s *SMT) Set(k, v []byte) lib.ErrorI {
+func (s *SMT) Set(k, v []byte) (err lib.ErrorI) {
 	start := time.Now()
 	s.stat = SMTStat{
 		duration: 0,
@@ -229,18 +240,21 @@ func (s *SMT) Set(k, v []byte) lib.ErrorI {
 		s.stat.duration = time.Since(start)
 		s.statsChan <- s.stat
 	}()
-
 	// calculate the key and value to upsert
-	s.target = &node{Key: newNodeKey(crypto.Hash(k), s.keyBitLength), Node: lib.Node{Value: crypto.Hash(v)}}
+	n := &node{Key: newNodeKey(crypto.Hash(k), s.keyBitLength), Node: lib.Node{Value: crypto.Hash(v)}}
 	// check to make sure the target is valid
-	if err := s.validateTarget(); err != nil {
+	if err = s.validateTarget(n); err != nil {
 		return err
 	}
-	// navigates the tree downward
-	if err := s.traverse(); err != nil {
-		return err
-	}
-	// if gcp != target key then it is an insert not an update
+	// set the node in the deferred list
+	s.addOperation(n)
+	// exit
+	return
+}
+
+// set() executes the 'set' logic after traversal
+func (s *SMT) set() lib.ErrorI {
+	// if current != target key then it is an insert not an update
 	if !s.target.Key.equals(s.gcp) {
 		// create a new node (new parent of current and target)
 		newParent := newNode()
@@ -264,15 +278,11 @@ func (s *SMT) Set(k, v []byte) lib.ErrorI {
 		s.traversed.Nodes = append(s.traversed.Nodes, newParent.copy())
 	}
 	// set the node in the database
-	if err := s.setNode(s.target); err != nil {
-		return err
-	}
-	// finish with a rehashing of the tree
-	return s.rehash()
+	return s.setNode(s.target)
 }
 
 // Delete: removes a target node if exists in the tree
-func (s *SMT) Delete(k []byte) lib.ErrorI {
+func (s *SMT) Delete(k []byte) (err lib.ErrorI) {
 	start := time.Now()
 	s.stat = SMTStat{
 		duration: 0,
@@ -284,15 +294,19 @@ func (s *SMT) Delete(k []byte) lib.ErrorI {
 		s.statsChan <- s.stat
 	}()
 	// calculate the key and value to upsert
-	s.target = &node{Key: newNodeKey(crypto.Hash(k), s.keyBitLength)}
+	n := &node{Key: newNodeKey(crypto.Hash(k), s.keyBitLength), delete: true}
 	// check to make sure the target is valid
-	if err := s.validateTarget(); err != nil {
-		return err
+	if err = s.validateTarget(n); err != nil {
+		return
 	}
-	// navigates the tree downward
-	if err := s.traverse(); err != nil {
-		return err
-	}
+	// set the node in the deferred list
+	s.addOperation(n)
+	// exit
+	return
+}
+
+// delete() executes the 'delete' logic after traversal
+func (s *SMT) delete() lib.ErrorI {
 	// if gcp != target key then there is no delete because the node does not exist
 	if !s.target.Key.equals(s.gcp) {
 		return nil
@@ -312,16 +326,50 @@ func (s *SMT) Delete(k []byte) lib.ErrorI {
 	// remove the parent from the traversed list
 	s.traversed.Pop()
 	// delete the target from the database
-	if err := s.delNode(targetBytes); err != nil {
-		return err
+	return s.delNode(targetBytes)
+}
+
+// Commit(): executes the deferred operations in order (left-to-right),
+// minimizing the amount of traversals, IOPS, and hash operations
+func (s *SMT) Commit() (err lib.ErrorI) {
+	s.sortOperations()
+	for {
+		// if no operations and at root - exit
+		if len(s.operations) == 0 && len(s.traversed.Nodes) == 0 {
+			return
+		}
+		// pop head into target
+		s.target, s.operations = s.operations[0], s.operations[1:]
+		// reset path variables
+		s.resetGCP()
+		// if not at root
+		if len(s.traversed.Nodes) != 0 {
+			// update the greatest common prefix and the bit position based on the new current key
+			s.target.Key.greatestCommonPrefix(&s.bitPos, s.gcp, s.current.Key)
+		}
+		// traverse to target
+		if err = s.traverse(); err != nil {
+			return
+		}
+		// execute operation
+		if !s.target.delete {
+			if err = s.set(); err != nil {
+				return
+			}
+		} else {
+			if err = s.delete(); err != nil {
+				return
+			}
+		}
+		// rehash
+		if err = s.rehash(); err != nil {
+			return
+		}
 	}
-	// finish with a rehashing of the tree
-	return s.rehash()
 }
 
 // traverse: navigates the tree downward to locate the target or its closest position
 func (s *SMT) traverse() (err lib.ErrorI) {
-	s.reset()
 	// execute main loop
 	for {
 		var currentKey []byte
@@ -339,6 +387,7 @@ func (s *SMT) traverse() (err lib.ErrorI) {
 		if err != nil {
 			return
 		}
+		// defensive nil check
 		if s.current == nil {
 			return ErrInvalidMerkleTree()
 		}
@@ -346,38 +395,60 @@ func (s *SMT) traverse() (err lib.ErrorI) {
 		s.current.Key.fromBytes(currentKey)
 		// update the greatest common prefix and the bit position based on the new current key
 		s.target.Key.greatestCommonPrefix(&s.bitPos, s.gcp, s.current.Key)
-		// exit conditions
+		// exit conditions, current != gcp || current == target
 		if !s.current.Key.equals(s.gcp) || s.target.Key.equals(s.gcp) {
 			return // exit loop
 		}
 	}
 }
 
-// rehash() recalculate hashes from the current node upwards
-func (s *SMT) rehash() lib.ErrorI {
-	// create a convenience variable for the max index of the array
-	maxIdx := len(s.traversed.Nodes) - 1
+// rehash() recalculate hashes from the current node upwards until
+// a) the next operation key is LTE the right sibling's key, after truncating it to the right sibling's key length
+// b) traversed list is empty
+func (s *SMT) rehash() (err lib.ErrorI) {
 	// iterate the traversed list from end to start
-	s.stat.rehashes = uint32(maxIdx + 1)
-	for i := maxIdx; i >= 0; i-- {
-		// child stores the cached from the parent that was traversed
-		var child *node
+	s.stat.rehashes = uint32(len(s.traversed.Nodes))
+	for {
+		if len(s.traversed.Nodes) == 0 {
+			return
+		}
 		// select the parent
-		parent := s.traversed.Nodes[i]
-		// get a child from the traversed list if possible
-		if i != maxIdx {
-			child = s.traversed.Nodes[i+1]
+		parent := s.traversed.Nodes[len(s.traversed.Nodes)-1]
+		// set current = parent
+		s.current = parent
+		// remove the parent from the traverse list
+		s.traversed.Pop()
+		// exit if next operation is LTE the right sibling
+		if len(s.operations) != 0 && s.operations[0].Key.cmp(&key{key: parent.RightChildKey}) <= 0 {
+			return
 		}
 		// calculate its new value
-		if err := s.updateParentValue(parent, child); err != nil {
-			return err
+		if err = s.updateParentValue(parent); err != nil {
+			return
 		}
 		// set node in the database
-		if err := s.setNode(parent); err != nil {
-			return err
+		if err = s.setNode(parent); err != nil {
+			return
 		}
 	}
-	return nil
+}
+
+// addOperation() adds a deferred operation to the sorted list
+func (s *SMT) addOperation(n *node) { s.unsortedOps[string(n.Key.bytes())] = n }
+
+// sortOperations() sorts the operations
+func (s *SMT) sortOperations() {
+	s.operations = make([]*node, len(s.unsortedOps))
+	// insert all unsorted operations into the slice
+	i := 0
+	for _, n := range s.unsortedOps {
+		s.operations[i] = n
+		i++
+	}
+	// sort the operations
+	sort.Slice(s.operations, func(i, j int) bool {
+		return s.operations[i].Key.cmp(s.operations[j].Key) < 0
+	})
 }
 
 // initializeTree() ensures the tree always has a root with two children
@@ -402,7 +473,7 @@ func (s *SMT) initializeTree(rootKey *key) {
 		},
 	}
 	// update the root's value
-	if err := s.updateParentValue(s.root, minNode); err != nil {
+	if err := s.updateParentValue(s.root); err != nil {
 		panic(err)
 	}
 	// set the root in store
@@ -412,30 +483,15 @@ func (s *SMT) initializeTree(rootKey *key) {
 }
 
 // updateParentValue() updates the value of parent based on its children
-func (s *SMT) updateParentValue(parent, child *node) (err lib.ErrorI) {
+func (s *SMT) updateParentValue(parent *node) (err lib.ErrorI) {
 	var rightChild, leftChild *node
-	// if there's a child from the traversed list
-	if child != nil {
-		// determine if it's the right or left child for the parent
-		if bytes.Equal(parent.RightChildKey, child.Key.bytes()) {
-			rightChild = child
-		} else {
-			leftChild = child
-		}
+	// get the left child
+	if leftChild, err = s.getNode(parent.LeftChildKey); err != nil {
+		return
 	}
 	// get the left child
-	if leftChild == nil {
-		// get the child from the database
-		if leftChild, err = s.getNode(parent.LeftChildKey); err != nil {
-			return
-		}
-	}
-	// get the left child
-	if rightChild == nil {
-		// get the child from the database
-		if rightChild, err = s.getNode(parent.RightChildKey); err != nil {
-			return
-		}
+	if rightChild, err = s.getNode(parent.RightChildKey); err != nil {
+		return
 	}
 	// create a buffer for the input
 	input := make([]byte, leftChild.Key.size()+len(leftChild.Value)+rightChild.Key.size()+len(rightChild.Value))
@@ -464,19 +520,24 @@ func (s *SMT) updateParentValue(parent, child *node) (err lib.ErrorI) {
 
 // reset() resets data for each operation
 func (s *SMT) reset() {
-	s.current, s.gcp = s.root.copy(), &key{}
+	s.current, s.traversed = s.root.copy(), &NodeList{Nodes: make([]*node, 0)}
+	s.resetGCP()
+}
+
+// resetGCP() resets the greatest common prefix and path variables
+func (s *SMT) resetGCP() {
+	s.gcp = &key{}
 	s.pathBit, s.bitPos = 0, 0
-	s.traversed = &NodeList{Nodes: make([]*node, 0)}
 }
 
 // setNode() set a node object in a key value database
 func (s *SMT) setNode(n *node) lib.ErrorI {
 	// check cache max size
 	if len(s.nodeCache) >= MaxCacheSize {
-		s.nodeCache = make(map[uint64]*node, MaxCacheSize)
+		s.nodeCache = make(map[string]*node, MaxCacheSize)
 	}
 	// set in cache
-	s.nodeCache[crypto.Hash64(n.Key.bytes())] = n
+	s.nodeCache[string(n.Key.bytes())] = n
 	// convert the node object to bytes
 	nodeBytes, err := n.bytes()
 	if err != nil {
@@ -488,14 +549,14 @@ func (s *SMT) setNode(n *node) lib.ErrorI {
 
 // delNode() remove a node from the database given its unique identifier
 func (s *SMT) delNode(key []byte) lib.ErrorI {
-	delete(s.nodeCache, crypto.Hash64(key))
+	delete(s.nodeCache, string(key))
 	return s.store.Delete(key)
 }
 
 // getNode() retrieves a node object from the database
 func (s *SMT) getNode(key []byte) (n *node, err lib.ErrorI) {
 	// check cache
-	n, found := s.nodeCache[crypto.Hash64(key)]
+	n, found := s.nodeCache[string(key)]
 	if found {
 		return n, nil
 	}
@@ -516,14 +577,14 @@ func (s *SMT) getNode(key []byte) (n *node, err lib.ErrorI) {
 }
 
 // validateTarget() checks the target to ensure it's not a reserved key like root, minimum or maximum
-func (s *SMT) validateTarget() lib.ErrorI {
-	if bytes.Equal(s.root.Key.bytes(), s.target.Key.bytes()) {
+func (s *SMT) validateTarget(n *node) lib.ErrorI {
+	if bytes.Equal(s.root.Key.bytes(), n.Key.bytes()) {
 		return ErrReserveKeyWrite("root")
 	}
-	if bytes.Equal(newNodeKey(bytes.Repeat([]byte{0}, 20), s.keyBitLength).bytes(), s.target.Key.bytes()) {
+	if bytes.Equal(newNodeKey(bytes.Repeat([]byte{0}, 20), s.keyBitLength).bytes(), n.Key.bytes()) {
 		return ErrReserveKeyWrite("minimum")
 	}
-	if bytes.Equal(newNodeKey(bytes.Repeat([]byte{255}, 20), s.keyBitLength).bytes(), s.target.Key.bytes()) {
+	if bytes.Equal(newNodeKey(bytes.Repeat([]byte{255}, 20), s.keyBitLength).bytes(), n.Key.bytes()) {
 		return ErrReserveKeyWrite("maximum")
 	}
 	return nil
@@ -535,11 +596,13 @@ func (s *SMT) GetMerkleProof(k []byte) ([]*lib.Node, lib.ErrorI) {
 	// calculate the key and value to traverse
 	s.target = &node{Key: newNodeKey(crypto.Hash(k), s.keyBitLength)}
 	// check to make sure the target is valid
-	if err := s.validateTarget(); err != nil {
+	if err := s.validateTarget(s.target); err != nil {
 		return nil, err
 	}
 	// make the slice to store the leaf nodes and the intermediate sibling nodes
 	proof := make([]*lib.Node, 0)
+	// reset the traversal variables
+	s.reset()
 	// navigates the tree downward
 	if err := s.traverse(); err != nil {
 		return nil, err
@@ -681,9 +744,11 @@ func (s *SMT) VerifyProof(k []byte, v []byte, validateMembership bool, root []by
 	// calculate the key to traverse the tree
 	smt.target = &node{Key: newNodeKey(crypto.Hash(k), smt.keyBitLength)}
 	// make sure the target is valid
-	if err := smt.validateTarget(); err != nil {
+	if err := smt.validateTarget(smt.target); err != nil {
 		return false, err
 	}
+	// reset the traversal variables
+	smt.reset()
 	// navigates the tree downward
 	if err := smt.traverse(); err != nil {
 		return false, err
@@ -711,34 +776,20 @@ func (s *SMT) VerifyProof(k []byte, v []byte, validateMembership bool, root []by
 
 /*
 Understanding Node Keys:
-	Node keys are compact representations of key bit sequences, truncated to fit the specified `KeyBitLength`
-	KV databases typically store keys as sequences of bytes, but the specified key length for prefix nodes
-    might not align with a whole number of bytes. Without the extra byte, there is no way to differentiate
-    between keys that share the same initial bytes but differ in bit-length. The extra byte encodes the number
-    of leading zero bits in the last byte of the key. This ensures that the database can reconstruct the
-    original bit-level representation of the key.
+- Node keys are []byte representation of 'left-to-right' bit-strings where the last byte is metadata
+that stores the number of left padding zeroes in the final data byte.
 
-	Example:
-	KeyBitLength = 24
-	Input:  []byte{255, 255, 255}
-	Input Bits:  []int{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
-	Output: []byte{255, 255, 255, 0}
-	Explanation: 0 leading zero bits in the last byte (255 is 0b11111111)
+The padding byte is needed in order to support varying length bit-strings:
 
-	KeyBitLength = 9
-	Input:  []byte{255, 255}
-	Input Bits:  []int{1, 1, 1, 1, 1, 1, 1, 1, 1}
-	Output: []byte{255, 1, 0}
-	Explanation: The last byte (255) has 0 leading zero bits.
-				 However, the key is truncated to 9 bits: 11111111 1,
-				 and the last byte (1) has 0 leading zero bits
+Examples:
+  - []byte{255, 0}       = 11111111           where bit-length = 8
+  - []byte{0, 0b1011, 2} = 00000000 001011    where bit-length = 14
+  - []byte{0, 0b1, 4}    = 00000000 00001     where bit-length = 13
+  - []byte{0, 1}         = 00                 where bit-length = 2
+  - []byte{0, 0}         = 0                  where bit-length = 1
 
-	KeyBitLength = 10
-	Input:  []byte{1, 0}
-	Input Bits:  []int{0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0}
-	Output: []byte{1, 0, 1}
-	Explanation: The last byte (0) has 1 leading zero bit (00)
-
+An alternative structure to this design would've been storing the bit-length in the final byte
+however storing the bit length might require two bytes for keys > length of 255
 */
 
 // key is the structure used to cache data about node keys for optimal performance
@@ -779,13 +830,15 @@ func newNodeKey(data []byte, bitCount int) (k *key) {
 	}
 	// zero out junk bits
 	k.key[numBytes-1] >>= 8 - lastByteBits
-	//
+	// calculate left padding (number of leading zeroes)
 	leftPadding := bits.LeadingZeros8(k.key[numBytes-1]) - (8 - lastByteBits)
 	if k.key[numBytes-1] == 0 {
 		leftPadding--
 	}
 	// append meta byte
 	k.key = append(k.key, byte(leftPadding))
+	// set bit count
+	k.bitCount = bitCount
 	// exit with key
 	return k
 }
@@ -913,6 +966,42 @@ func (k *key) bitAtIndex(b byte, index int) int { return int(b>>index) & 1 }
 
 // equals() returns true if two key objects are equivalent
 func (k *key) equals(k2 *key) bool { return bytes.Equal(k.key, k2.key) }
+
+// cmp() compares two node keys, returning -1 for less, 0 for equal, and 1 for greater than
+// - contract: `k2`'s size is always less than or equal to (`k`)
+func (k *key) cmp(k2 *key) int {
+	var startBit int
+	// get the totalBits of k2
+	k2TotalBits := k2.totalBits()
+	// calculate the number of full bytes
+	fullBytes := k2TotalBits / 8
+	// if k2 has full bytes
+	if fullBytes > 0 {
+		// calculate start bit
+		startBit = fullBytes * 8
+		// compare the full bytes
+		fullBytesCmp := bytes.Compare(k.key[:fullBytes], k2.key[:fullBytes])
+		// if full bytes aren't equal
+		if fullBytesCmp != 0 {
+			return fullBytesCmp
+		}
+	}
+	// do bitwise comparison for the remaining bits
+	for i := startBit; i < k2TotalBits; i++ {
+		// compare bit by bit in the final data byte
+		b1, b2 := k.bitAt(i), k2.bitAt(i)
+		switch {
+		// less
+		case b1 < b2:
+			return -1
+		// greater
+		case b1 > b2:
+			return 1
+		}
+	}
+	// exit
+	return 0
+}
 
 // NODE CODE BELOW
 

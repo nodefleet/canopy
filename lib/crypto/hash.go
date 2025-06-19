@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"github.com/cespare/xxhash/v2"
 	"hash"
 )
 
@@ -27,13 +26,8 @@ func Hasher() hash.Hash { return sha256.New() }
 
 // Hash() executes the global hashing algorithm on input bytes
 func Hash(msg []byte) []byte {
-	//h := blake3.Sum256(msg)
 	h := sha256.Sum256(msg)
 	return h[:]
-}
-
-func Hash64(msg []byte) uint64 {
-	return xxhash.Sum64(msg)
 }
 
 // ShortHash() executes the global hashing algorithm on input bytes
