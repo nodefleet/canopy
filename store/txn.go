@@ -3,7 +3,6 @@ package store
 import (
 	"bytes"
 	"crypto/rand"
-	"fmt"
 	"math"
 	"reflect"
 	"strings"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/canopy-network/canopy/lib"
 	"github.com/dgraph-io/badger/v4"
-	"github.com/dgraph-io/badger/v4/skl"
 
 	"maps"
 
@@ -358,7 +356,6 @@ func newTxnIterator(parent lib.IteratorI, t txn, parentPrefix, prefix []byte, re
 		parentPrefix: string(parentPrefix),
 		prefix:       string(prefix),
 		reverse:      reverse,
-		// hasNext:      tree.HasNext(),
 	}).First()
 }
 
@@ -686,34 +683,6 @@ func FlushMemTable(db *badger.DB) lib.ErrorI {
 	if err := db.DropPrefix(randomPrefix); err != nil {
 		return ErrFlushMemTable(err)
 	}
-	return nil
-}
-
-// setBatchOptions() updates unexported badgerDB batch options
-func setBatchOptions(db *badger.DB, batchSize int64) error {
-	// Access the DB struct's Options field using reflection
-	v := reflect.ValueOf(db).Elem()
-
-	// Access the 'opt' field of DB struct using unsafe
-	optField := v.FieldByName("opt")
-	if !optField.IsValid() {
-		return fmt.Errorf("unable to access 'opt' field")
-	}
-
-	// Use unsafe.Pointer to get a pointer to the unexported field
-	optPtr := unsafe.Pointer(optField.UnsafeAddr())
-	optStruct := reflect.NewAt(optField.Type(), optPtr).Elem()
-
-	maxBatchSizeField := optStruct.FieldByName("maxBatchSize")
-	maxBatchCountField := optStruct.FieldByName("maxBatchCount")
-	// Now, use unsafe.Pointer to modify the unexported fields directly
-	batchSizePtr := unsafe.Pointer(maxBatchSizeField.UnsafeAddr())
-	batchCountPtr := unsafe.Pointer(maxBatchCountField.UnsafeAddr())
-
-	// Set values using unsafe pointer manipulation
-	*(*int64)(batchSizePtr) = batchSize
-	*(*int64)(batchCountPtr) = batchSize / int64(skl.MaxNodeSize)
-
 	return nil
 }
 

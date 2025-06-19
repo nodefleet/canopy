@@ -163,9 +163,6 @@ func NewStore(path string, metrics *lib.Metrics, log lib.LoggerI) (lib.StoreI, l
 	if err != nil {
 		return nil, ErrOpenDB(err)
 	}
-	if e := setBatchOptions(db, 128*int64(units.MB)); e != nil {
-		return nil, ErrOpenDB(e)
-	}
 	return NewStoreWithDB(db, metrics, log, true)
 }
 
@@ -347,6 +344,7 @@ func (s *Store) Partition() {
 	start := time.Now()
 	// create a copy of the store for multi-thread safety
 	sCopy, err := s.Copy()
+	defer sCopy.Discard()
 	if err != nil {
 		s.log.Errorf(err.Error())
 		return
@@ -581,8 +579,9 @@ func (s *Store) Reset() {
 	s.resetWriter()
 }
 
-// Discard() closes the writer
+// Discard() closes the reader and writer
 func (s *Store) Discard() {
+	s.reader.Discard()
 	s.writer.Cancel()
 }
 

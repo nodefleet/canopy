@@ -27,7 +27,6 @@ func TestMaxTransaction(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { db.Close() }()
 	tx := db.NewTransactionAt(1, true)
-	require.NoError(t, setBatchOptions(db, maxTransactionSize))
 	i := 0
 	totalBytes := 0
 	defer func() {

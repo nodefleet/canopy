@@ -135,7 +135,7 @@ func (s *SMT) logData() {
 }
 
 const MaxKeyBitLength = 160 // the maximum leaf key bits (20 bytes)
-const MaxCacheSize = 1000000
+const MaxCacheSize = 1_000_000
 
 type SMT struct {
 	// store: an abstraction of the database where the tree is being stored
