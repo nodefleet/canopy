@@ -271,16 +271,6 @@ func (c *Controller) CommitCertificate(qc *lib.QuorumCertificate, block *lib.Blo
 		// exit with error
 		return
 	}
-	// check if the store should partition
-	if storeI.ShouldPartition() {
-		// if syncing, run the partition synchronously
-		if c.isSyncing.Load() {
-			storeI.Partition() // TODO: make async design during syncing; worried this may create a temporary P2P deadlock in the future
-		} else {
-			// execute the partition as a background process to not interrupt consensus
-			go storeI.Partition()
-		}
-	}
 	// log to signal finishing the commit
 	c.log.Infof("Committed block %s at H:%d 🔒", lib.BytesToTruncatedString(qc.BlockHash), block.BlockHeader.Height)
 	// set up the finite state machine for the next height

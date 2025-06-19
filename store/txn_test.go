@@ -18,19 +18,19 @@ func newTxn(t *testing.T, prefix []byte) (*Txn, *badger.DB, *badger.WriteBatch) 
 	var version uint64 = 1
 	reader := db.NewTransactionAt(version, false)
 	writer := db.NewWriteBatchAt(version)
-	return NewBadgerTxn(reader, writer, prefix, true, lib.NewDefaultLogger()), db, writer
+	return NewBadgerTxn(reader, writer, prefix, true, version, lib.NewDefaultLogger()), db, writer
 }
 
 func TestNestedTxn(t *testing.T) {
 	baseTxn, db, _ := newTxn(t, []byte("1/"))
 	defer func() { baseTxn.Close(); db.Close(); baseTxn.Discard() }()
 	// create a nested transaction
-	nested := NewTxn(baseTxn, baseTxn, []byte("2/"), true, baseTxn.logger)
+	nested := NewTxn(baseTxn, baseTxn, []byte("2/"), true, baseTxn.writeVersion, baseTxn.logger)
 	// set some values in the nested transaction
 	require.NoError(t, nested.Set([]byte("a"), []byte("a")))
 	require.NoError(t, nested.Set([]byte("b"), []byte("b")))
 	require.NoError(t, nested.Delete([]byte("a")))
-	// confirm value is succesfully deleted
+	// confirm value is successfully deleted
 	val, err := nested.Get([]byte("a"))
 	require.NoError(t, err)
 	require.Nil(t, val)

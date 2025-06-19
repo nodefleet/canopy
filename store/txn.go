@@ -42,10 +42,8 @@ const (
 	// ----------------------------------------------------------------------------------------------------------------
 	// Bits source: https://github.com/hypermodeinc/badger/blob/85389e88bf308c1dc271383b77b67f4ef4a85194/value.go#L37
 	badgerMetaFieldName                = "meta"  // badgerDB Entry 'meta' field name
-	badgerDiscardEarlierVersions  byte = 1 << 2  // badgerDB 'discard earlier versions' flag
 	badgerDeleteBit               byte = 1 << 0  // badgerDB 'tombstoned' flag
 	badgerNoDiscardBit            byte = 1 << 3  // badgerDB 'never discard'  bit
-	badgerGCRatio                      = .15     // the ratio when badgerDB will run the garbage collector
 	badgerSizeFieldName                = "size"  // badgerDB Txn 'size' field name
 	badgerCountFieldName               = "count" // badgerDB Txn 'count' field name
 	badgerTxnFieldName                 = "txn"   // badgerDB WriteBatch 'txn' field name
@@ -65,7 +63,7 @@ type TxnReaderI interface {
 type TxnWriterI interface {
 	Set(key, value []byte) lib.ErrorI
 	Delete(key []byte) lib.ErrorI
-	SetEntry(entry *badger.Entry) lib.ErrorI
+	SetEntry(entry *badger.Entry, version uint64) lib.ErrorI
 	Write() lib.ErrorI
 	Cancel()
 }
@@ -94,22 +92,18 @@ var _ lib.IteratorI = &Iterator{}
 */
 
 type Txn struct {
-	reader TxnReaderI  // memory store to Read() from
-	writer TxnWriterI  // memory store to Write() to
-	prefix []byte      // prefix for keys in this txn
-	logger lib.LoggerI // logger for this txn
-	sort   bool        // whether to sort the keys in the cache; used for iteration
-	cache  txn
-}
-
-type cache struct {
-	Value string
+	reader       TxnReaderI  // memory store to Read() from
+	writer       TxnWriterI  // memory store to Write() to
+	prefix       []byte      // prefix for keys in this txn
+	logger       lib.LoggerI // logger for this txn
+	sort         bool        // whether to sort the keys in the cache; used for iteration
+	writeVersion uint64      // the version to commit the data to
+	cache        txn
 }
 
 // txn internal structure maintains the write operations sorted lexicographically by keys
 type txn struct {
-	ops map[string]valueOp // [string(key)] -> set/del operations saved in memory
-	// sorted   []string           // ops keys sorted lexicographically; needed for iteration
+	ops       map[string]valueOp        // [string(key)] -> set/del operations saved in memory
 	sorted    *btree.BTreeG[*CacheItem] // sorted btree of keys for fast iteration
 	sortedLen int                       // len(sorted)
 }
@@ -129,10 +123,9 @@ func (t txn) copy() txn {
 type op uint8
 
 const (
-	opDelete    op = iota // delete the key
-	opSet                 // set the key
-	opTombstone           // tombstone the key (false delete)
-	opEntry               // custom badger entry
+	opDelete op = iota // delete the key
+	opSet              // set the key
+	opEntry            // custom badger entry
 )
 
 // valueOp has the value portion of the operation and the corresponding operation to perform
@@ -144,13 +137,14 @@ type valueOp struct {
 }
 
 // NewBadgerTxn() creates a new instance of Txn from badger Txn and WriteBatch correspondingly
-func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, sort bool, logger lib.LoggerI) *Txn {
+func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, sort bool, writeVersion uint64, logger lib.LoggerI) *Txn {
 	return &Txn{
-		reader: BadgerTxnReader{reader, prefix},
-		writer: BadgerTxnWriter{writer},
-		prefix: prefix,
-		logger: logger,
-		sort:   sort,
+		reader:       BadgerTxnReader{reader, prefix},
+		writer:       BadgerTxnWriter{writer},
+		prefix:       prefix,
+		logger:       logger,
+		sort:         sort,
+		writeVersion: writeVersion,
 		cache: txn{
 			ops: make(map[string]valueOp),
 			sorted: btree.NewG(32, func(a, b *CacheItem) bool {
@@ -161,13 +155,14 @@ func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, 
 }
 
 // NewTxn() creates a new instance of Txn with the specified reader and writer
-func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, sort bool, logger lib.LoggerI) *Txn {
+func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, sort bool, version uint64, logger lib.LoggerI) *Txn {
 	return &Txn{
-		reader: reader,
-		writer: writer,
-		prefix: prefix,
-		logger: logger,
-		sort:   sort,
+		reader:       reader,
+		writer:       writer,
+		prefix:       prefix,
+		logger:       logger,
+		sort:         sort,
+		writeVersion: version,
 		cache: txn{
 			ops: make(map[string]valueOp),
 			sorted: btree.NewG(32, func(a, b *CacheItem) bool {
@@ -201,14 +196,8 @@ func (t *Txn) Delete(key []byte) lib.ErrorI {
 	return nil
 }
 
-// Tombstone() removes the key-value pair from the BadgerDB transaction but prevents it from being garbage collected
-func (t *Txn) Tombstone(key []byte) lib.ErrorI {
-	t.update(lib.Append(t.prefix, key), nil, opTombstone)
-	return nil
-}
-
 // SetEntry() adds or updates a custom badger entry in the cache operations
-func (t *Txn) SetEntry(entry *badger.Entry) lib.ErrorI {
+func (t *Txn) SetEntry(entry *badger.Entry, _ uint64) lib.ErrorI {
 	t.updateEntry(lib.Append(t.prefix, entry.Key), entry)
 	return nil
 }
@@ -236,7 +225,7 @@ func (t *Txn) updateEntry(key []byte, v *badger.Entry) {
 			t.addToSorted(string(key))
 		}
 	}
-	t.cache.ops[k] = valueOp{key: key, valueEntry: v, op: opEntry}
+	t.cache.ops[k] = valueOp{key: key, value: v.Value, valueEntry: v, op: opEntry}
 }
 
 // addToSorted() inserts a key into the sorted list of operations maintaining lexicographical order
@@ -276,24 +265,20 @@ func (t *Txn) Cancel() {
 // Write() flushes the in-memory operations to the batch writer and clears in-memory changes
 func (t *Txn) Write() lib.ErrorI {
 	for _, v := range t.cache.ops {
-		sk := v.key
 		switch v.op {
 		case opSet:
-			if err := t.writer.Set(sk, v.value); err != nil {
-				return ErrStoreSet(err)
-			}
-		case opDelete:
-			if err := t.writer.Delete(sk); err != nil {
+			// set an entry with a bit that marks it as deleted and prevents it from being discarded
+			if err := t.writer.SetEntry(&badger.Entry{Key: v.key, Value: v.value}, t.writeVersion); err != nil {
 				return ErrStoreDelete(err)
 			}
-		case opTombstone:
+		case opDelete:
 			// set an entry with a bit that marks it as deleted and prevents it from being discarded
-			if err := t.writer.SetEntry(newEntry(sk, nil, badgerDeleteBit|badgerNoDiscardBit)); err != nil {
+			if err := t.writer.SetEntry(newEntry(v.key, nil, badgerDeleteBit|badgerNoDiscardBit), t.writeVersion); err != nil {
 				return ErrStoreDelete(err)
 			}
 		case opEntry:
 			// set the entry in the batch
-			if err := t.writer.SetEntry(v.valueEntry); err != nil {
+			if err := t.writer.SetEntry(v.valueEntry, t.writeVersion); err != nil {
 				return ErrStoreSet(err)
 			}
 		}
@@ -428,14 +413,14 @@ func (ti *TxnIterator) Valid() bool {
 		case 1: // use parent
 			ti.useTxn = false
 		case 0: // when equal txn shadows parent
-			if ti.txnValue().op == opDelete || ti.txnValue().op == opTombstone {
+			if ti.txnValue().op == opDelete {
 				ti.parent.Next()
 				ti.txnNext()
 				continue
 			}
 			ti.useTxn = true
 		case -1: // use txn
-			if ti.txnValue().op == opDelete || ti.txnValue().op == opTombstone {
+			if ti.txnValue().op == opDelete {
 				ti.txnNext()
 				continue
 			}
@@ -450,7 +435,7 @@ func (ti *TxnIterator) Valid() bool {
 // return when invalid or !deleted
 func (ti *TxnIterator) txnFastForward() {
 	for {
-		if ti.txnInvalid() || !(ti.txnValue().op == opDelete || ti.txnValue().op == opTombstone) {
+		if ti.txnInvalid() || !(ti.txnValue().op == opDelete) {
 			return
 		}
 		ti.txnNext()
@@ -619,8 +604,8 @@ func (w BadgerTxnWriter) Delete(key []byte) lib.ErrorI {
 	return nil
 }
 
-func (w BadgerTxnWriter) SetEntry(entry *badger.Entry) lib.ErrorI {
-	err := w.WriteBatch.SetEntry(entry)
+func (w BadgerTxnWriter) SetEntry(entry *badger.Entry, version uint64) lib.ErrorI {
+	err := w.WriteBatch.SetEntryAt(entry, version)
 	if err != nil {
 		return ErrStoreSet(err)
 	}
