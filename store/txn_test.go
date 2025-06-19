@@ -18,14 +18,14 @@ func newTxn(t *testing.T, prefix []byte) (*Txn, *badger.DB, *badger.WriteBatch) 
 	var version uint64 = 1
 	reader := db.NewTransactionAt(version, false)
 	writer := db.NewWriteBatchAt(version)
-	return NewBadgerTxn(reader, writer, prefix, true, version, lib.NewDefaultLogger()), db, writer
+	return NewBadgerTxn(reader, writer, prefix, true, version, false, lib.NewDefaultLogger()), db, writer
 }
 
 func TestNestedTxn(t *testing.T) {
 	baseTxn, db, _ := newTxn(t, []byte("1/"))
 	defer func() { baseTxn.Close(); db.Close(); baseTxn.Discard() }()
 	// create a nested transaction
-	nested := NewTxn(baseTxn, baseTxn, []byte("2/"), true, baseTxn.writeVersion, baseTxn.logger)
+	nested := NewTxn(baseTxn, baseTxn, []byte("2/"), true, baseTxn.writeVersion, false, baseTxn.logger)
 	// set some values in the nested transaction
 	require.NoError(t, nested.Set([]byte("a"), []byte("a")))
 	require.NoError(t, nested.Set([]byte("b"), []byte("b")))
@@ -379,4 +379,90 @@ func TestTxnIterateWithDeleteDuringIteration(t *testing.T) {
 	for _, k := range []string{"a", "b", "c", "d", "e"} {
 		require.Equal(t, 1, seen[k], "key %s was not iterated or was seen multiple times", k)
 	}
+}
+
+func TestLiveWriteVsNormalWrite(t *testing.T) {
+	// create two separate databases
+	db1, err := badger.OpenManaged(badger.DefaultOptions("").WithInMemory(true).WithLoggingLevel(badger.ERROR))
+	require.NoError(t, err)
+	defer db1.Close()
+	db2, err := badger.OpenManaged(badger.DefaultOptions("").WithInMemory(true).WithLoggingLevel(badger.ERROR))
+	require.NoError(t, err)
+	defer db2.Close()
+
+	// setup transactions with same prefix and version
+	var version uint64 = 1
+	prefix := []byte("test/")
+
+	// first transaction with live write enabled
+	reader1 := db1.NewTransactionAt(version, false)
+	writer1 := db1.NewWriteBatchAt(version)
+	// liveWrite enabled
+	txn1 := NewBadgerTxn(reader1, writer1, prefix, true, version, true, lib.NewDefaultLogger())
+	// second transaction without live write
+	reader2 := db2.NewTransactionAt(version, false)
+	writer2 := db2.NewWriteBatchAt(version)
+	// liveWrite disabled
+	txn2 := NewBadgerTxn(reader2, writer2, prefix, true, version, false, lib.NewDefaultLogger())
+
+	// Define the operations to perform on both transactions
+	keys := []string{"a", "b", "c", "d", "e"}
+	delKeys := keys[len(keys)-2:]
+
+	// perform the same operations on both transactions
+	for _, k := range keys {
+		key := []byte(k)
+		value := []byte("value-" + k)
+
+		// set values in both transactions
+		require.NoError(t, txn1.Set(key, value))
+		require.NoError(t, txn2.Set(key, value))
+	}
+
+	// delete some keys from both transactions
+	for _, k := range delKeys {
+		require.NoError(t, txn1.Delete([]byte(k)))
+		require.NoError(t, txn2.Delete([]byte(k)))
+	}
+
+	// call Write on both transactions
+	require.NoError(t, txn1.Write())
+	require.NoError(t, txn2.Write())
+
+	// flush writers explicitly
+	require.NoError(t, writer1.Flush())
+	require.NoError(t, writer2.Flush())
+
+	// verify each key has the same value in both databases
+	for _, k := range keys {
+		key := append(prefix, []byte(k)...)
+
+		if !slices.Contains(delKeys, k) {
+			// get from DB1
+			item1, err := reader1.Get(key)
+			require.NoError(t, err)
+			val1, err := item1.ValueCopy(nil)
+			require.NoError(t, err)
+			// get from DB2
+			item2, err := reader2.Get(key)
+			require.NoError(t, err)
+			val2, err := item2.ValueCopy(nil)
+			require.NoError(t, err)
+			// compare key/values
+			require.Equal(t, val1, val2)
+			require.Equal(t, []byte("value-"+k), val1)
+		} else {
+			// check keys that should be deleted
+			_, err := reader1.Get(key)
+			require.Error(t, err)
+			require.True(t, err == badger.ErrKeyNotFound)
+			_, err = reader2.Get(key)
+			require.Error(t, err)
+			require.True(t, err == badger.ErrKeyNotFound)
+		}
+	}
+
+	// Clean up resources
+	txn1.Close()
+	txn2.Close()
 }

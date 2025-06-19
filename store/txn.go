@@ -3,9 +3,11 @@ package store
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"math"
 	"reflect"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/canopy-network/canopy/lib"
@@ -99,6 +101,18 @@ type Txn struct {
 	sort         bool        // whether to sort the keys in the cache; used for iteration
 	writeVersion uint64      // the version to commit the data to
 	cache        txn
+
+	// liveWrite enables real-time writing of key-values to the writer as they're set,
+	// rather than batching them at commit time. While this adds minimal overhead to
+	// individual set operations, it can significantly improve overall performance when
+	// calling Write() to persist data to the writer by spreading the I/O cost over time.
+	// Fields supporting live writing functionality
+	liveWrite bool
+	mu        sync.Mutex
+	wg        sync.WaitGroup
+	queue     []valueOp
+	sender    chan valueOp
+	err       error
 }
 
 // txn internal structure maintains the write operations sorted lexicographically by keys
@@ -137,26 +151,13 @@ type valueOp struct {
 }
 
 // NewBadgerTxn() creates a new instance of Txn from badger Txn and WriteBatch correspondingly
-func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, sort bool, writeVersion uint64, logger lib.LoggerI) *Txn {
-	return &Txn{
-		reader:       BadgerTxnReader{reader, prefix},
-		writer:       BadgerTxnWriter{writer},
-		prefix:       prefix,
-		logger:       logger,
-		sort:         sort,
-		writeVersion: writeVersion,
-		cache: txn{
-			ops: make(map[string]valueOp),
-			sorted: btree.NewG(32, func(a, b *CacheItem) bool {
-				return a.Less(b)
-			}), // need to benchmark this value
-		},
-	}
+func NewBadgerTxn(reader *badger.Txn, writer *badger.WriteBatch, prefix []byte, sort bool, writeVersion uint64, liveWrite bool, logger lib.LoggerI) *Txn {
+	return NewTxn(BadgerTxnReader{reader, prefix}, BadgerTxnWriter{writer}, prefix, sort, writeVersion, liveWrite, logger)
 }
 
 // NewTxn() creates a new instance of Txn with the specified reader and writer
-func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, sort bool, version uint64, logger lib.LoggerI) *Txn {
-	return &Txn{
+func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, sort bool, version uint64, liveWrite bool, logger lib.LoggerI) *Txn {
+	txn := &Txn{
 		reader:       reader,
 		writer:       writer,
 		prefix:       prefix,
@@ -169,6 +170,70 @@ func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, sort bool, vers
 				return a.Less(b)
 			}), // need to benchmark this value
 		},
+	}
+
+	if liveWrite {
+		txn.liveWrite = liveWrite
+		txn.queue = []valueOp{}
+		txn.sender = make(chan valueOp, 1000)
+		txn.mu = sync.Mutex{}
+		txn.wg = sync.WaitGroup{}
+		txn.liveWriter()
+	}
+
+	return txn
+}
+
+// liveWriter is a background goroutine that writes the operations to the writer as soon
+// as they are received
+func (t *Txn) liveWriter() {
+	// processQueue processes the next operation in the queue
+	processQueue := func() {
+		if len(t.queue) > 0 {
+			valueOp := t.queue[0]
+			t.queue = t.queue[1:]
+			if err := t.processOperation(valueOp); err != nil {
+				t.err = errors.Join(t.err, err)
+			}
+			t.wg.Done()
+		}
+	}
+	go func() {
+		for {
+			// check the queue for operations
+			t.mu.Lock()
+			processQueue()
+			t.mu.Unlock()
+			// wait for the next operation to be sent to the channel
+			valueOp, ok := <-t.sender
+			if !ok {
+				break
+			}
+			t.processOperation(valueOp)
+			t.wg.Done()
+		}
+		// process any remaining operations in the queue
+		t.mu.Lock()
+		for len(t.queue) > 0 {
+			processQueue()
+		}
+		t.mu.Unlock()
+	}()
+}
+
+// sendToLiveWriter sends a value operation to the live writer channel and queues it
+// if the channel is full. This allow operations to be non blocking
+func (t *Txn) sendToLiveWriter(valueOp valueOp) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.wg.Add(1)
+	// try sending to the channel
+	select {
+	case t.sender <- valueOp:
+	default:
+		// send to queue if channel is full
+		t.queue = append(t.queue, valueOp)
 	}
 }
 
@@ -212,7 +277,12 @@ func (t *Txn) update(key []byte, v []byte, opAction op) {
 			t.addToSorted(string(key))
 		}
 	}
-	t.cache.ops[k] = valueOp{key: key, value: v, op: opAction}
+	valueOp := valueOp{key: key, value: v, op: opAction}
+	t.cache.ops[k] = valueOp
+
+	if t.liveWrite {
+		t.sendToLiveWriter(valueOp)
+	}
 }
 
 // updateEntry() modifies or adds a custom badger entry in the cache operations and maintains the
@@ -225,7 +295,13 @@ func (t *Txn) updateEntry(key []byte, v *badger.Entry) {
 			t.addToSorted(string(key))
 		}
 	}
-	t.cache.ops[k] = valueOp{key: key, value: v.Value, valueEntry: v, op: opEntry}
+
+	valueOp := valueOp{key: key, value: v.Value, valueEntry: v, op: opEntry}
+	t.cache.ops[k] = valueOp
+
+	if t.liveWrite {
+		t.sendToLiveWriter(valueOp)
+	}
 }
 
 // addToSorted() inserts a key into the sorted list of operations maintaining lexicographical order
@@ -257,33 +333,74 @@ func (t *Txn) Discard() {
 	t.cache.ops, t.cache.sortedLen = make(map[string]valueOp), 0
 }
 
-// Cancel() cancels the current transaction. Any new writes won't be committed
+// Cancel() cancels the current transaction and clears the live writer queue if enabled.
+// Any new writes won't be committed
 func (t *Txn) Cancel() {
+	if t.liveWrite {
+		t.liveWrite = false
+		close(t.sender)
+		// clear the queue and decrement the wait group for each pending operation
+		t.mu.Lock()
+		pendingOps := len(t.queue)
+		t.queue = make([]valueOp, 0)
+		t.mu.Unlock()
+		// decrement waitgroup for all pending operations
+		for range pendingOps {
+			t.wg.Done()
+		}
+	}
+	// close the writer
 	t.writer.Cancel()
 }
 
 // Write() flushes the in-memory operations to the batch writer and clears in-memory changes
 func (t *Txn) Write() lib.ErrorI {
+	if t.liveWrite {
+		// set live writer to false to prevent further writes
+		t.liveWrite = false
+		// close sender channel to signal end of operations
+		close(t.sender)
+		// wait for all pending operations to complete
+		t.wg.Wait()
+		// clear the in-memory operations after writing
+		t.Discard()
+		// return any errors encountered during the write process
+		if t.err != nil {
+			return t.err.(lib.ErrorI)
+		}
+		// no need to process t.cache.ops again since they have already been applied
+		return nil
+	}
+	// flush all operations to the writer
 	for _, v := range t.cache.ops {
-		switch v.op {
-		case opSet:
-			// set an entry with a bit that marks it as deleted and prevents it from being discarded
-			if err := t.writer.SetEntry(&badger.Entry{Key: v.key, Value: v.value}, t.writeVersion); err != nil {
-				return ErrStoreDelete(err)
-			}
-		case opDelete:
-			// set an entry with a bit that marks it as deleted and prevents it from being discarded
-			if err := t.writer.SetEntry(newEntry(v.key, nil, badgerDeleteBit|badgerNoDiscardBit), t.writeVersion); err != nil {
-				return ErrStoreDelete(err)
-			}
-		case opEntry:
-			// set the entry in the batch
-			if err := t.writer.SetEntry(v.valueEntry, t.writeVersion); err != nil {
-				return ErrStoreSet(err)
-			}
+		if err := t.processOperation(v); err != nil {
+			return err
 		}
 	}
-	t.Discard() // clear the in-memory operations after writing
+	// clear the in-memory operations after writing
+	t.Discard()
+	// exit
+	return nil
+}
+
+func (t *Txn) processOperation(vOp valueOp) lib.ErrorI {
+	switch vOp.op {
+	case opSet:
+		// set an entry with a bit that marks it as deleted and prevents it from being discarded
+		if err := t.writer.SetEntry(&badger.Entry{Key: vOp.key, Value: vOp.value}, t.writeVersion); err != nil {
+			return ErrStoreDelete(err)
+		}
+	case opDelete:
+		// set an entry with a bit that marks it as deleted and prevents it from being discarded
+		if err := t.writer.SetEntry(newEntry(vOp.key, nil, badgerDeleteBit|badgerNoDiscardBit), t.writeVersion); err != nil {
+			return ErrStoreDelete(err)
+		}
+	case opEntry:
+		// set the entry in the batch
+		if err := t.writer.SetEntry(vOp.valueEntry, t.writeVersion); err != nil {
+			return ErrStoreSet(err)
+		}
+	}
 
 	return nil
 }
@@ -300,7 +417,7 @@ func (t *Txn) NewIterator(prefix []byte, reverse bool, allVersions bool) lib.Ite
 // WriteBatch() must be created to write new entries.
 func (t *Txn) Close() {
 	t.reader.Discard()
-	t.writer.Cancel()
+	t.Cancel()
 }
 func (t *Txn) setDBWriter(w *badger.WriteBatch) { t.writer = BadgerTxnWriter{w} }
 func (t *Txn) setDBReader(r *badger.Txn)        { t.reader = BadgerTxnReader{r, t.prefix} }
