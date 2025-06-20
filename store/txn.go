@@ -876,11 +876,11 @@ func (lv *liveWriter) start() {
 
 	// process processes the next operation in the queue
 	process := func(valueOp valueOp) {
+		defer lv.wg.Done()
 		err := processOperation(lv.writer, lv.version, valueOp)
 		if err != nil {
 			lv.err = errors.Join(lv.err, err)
 		}
-		lv.wg.Done()
 	}
 	go func() {
 		for {
@@ -896,7 +896,7 @@ func (lv *liveWriter) start() {
 			process(valueOp)
 		}
 		// process any remaining operations in the queue
-		for vOp, ok := lv.queue.Pop(); ok; {
+		for vOp, ok := lv.queue.Pop(); ok; vOp, ok = lv.queue.Pop() {
 			process(vOp)
 		}
 	}()
