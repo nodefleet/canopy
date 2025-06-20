@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"unsafe"
@@ -74,20 +75,34 @@ type Txn struct {
 
 // txn internal structure maintains the write operations sorted lexicographically by keys
 type txn struct {
-	ops       map[string]valueOp        // [string(key)] -> set/del operations saved in memory
-	sorted    *btree.BTreeG[*CacheItem] // sorted btree of keys for fast iteration
-	sortedLen int                       // len(sorted)
+	ops       map[string]valueOp // [string(key)] -> set/del operations saved in memory
+	sortedLen int                // len(sorted)
+	sorted    []string           // new sorted keys
 }
 
 // txn() returns a copy of the current transaction cache
 func (t txn) copy() txn {
 	ops := make(map[string]valueOp, t.sortedLen)
 	maps.Copy(ops, t.ops)
+	t.sortOperations()
 	return txn{
 		ops:       ops,
-		sorted:    t.sorted.Clone(),
-		sortedLen: t.sortedLen,
+		sortedLen: len(t.sorted),
+		sorted:    t.sorted,
 	}
+}
+
+// sortOperations sorts the operations
+func (t *txn) sortOperations() {
+	t.sorted = make([]string, len(t.ops))
+	// insert all unsorted value operations into the slice
+	i := 0
+	for key := range t.ops {
+		t.sorted[i] = key
+		i++
+	}
+	// sort the operations
+	sort.Strings(t.sorted)
 }
 
 // op is the type of operation to be performed on the key
@@ -122,8 +137,7 @@ func NewTxn(reader TxnReaderI, writer TxnWriterI, prefix []byte, sort bool, vers
 		sort:         sort,
 		writeVersion: version,
 		cache: txn{
-			ops:    make(map[string]valueOp),
-			sorted: btree.NewG(32, func(a, b *CacheItem) bool { return a.Less(b) }), // need to benchmark this value
+			ops: make(map[string]valueOp),
 		},
 	}
 
@@ -141,7 +155,7 @@ func (t *Txn) Get(key []byte) ([]byte, lib.ErrorI) {
 	// append the prefix to the key
 	prefixedKey := lib.Append(t.prefix, key)
 	// first retrieve from the in-memory cache
-	if v, found := t.cache.ops[string(prefixedKey)]; found {
+	if v, found := t.cache.ops[lib.BytesToString(prefixedKey)]; found {
 		return v.value, nil
 	}
 	// if not found, retrieve from the parent reader
@@ -170,12 +184,8 @@ func (t *Txn) SetEntryAt(entry *badger.Entry, _ uint64) error {
 // lexicographical order.
 // NOTE: update() won't modify the key itself, any key prefixing must be done before calling this
 func (t *Txn) update(key []byte, v []byte, opAction op) {
-	k := string(key)
-	if t.sort {
-		if _, found := t.cache.ops[k]; !found && t.sort {
-			t.addToSorted(string(key))
-		}
-	}
+	k := lib.BytesToString(key)
+
 	valueOp := valueOp{key: key, value: v, op: opAction}
 	t.cache.ops[k] = valueOp
 
@@ -188,25 +198,13 @@ func (t *Txn) update(key []byte, v []byte, opAction op) {
 // lexicographical order.
 // NOTE: updateEntry() won't modify the key itself, any key prefixing must be done before calling this
 func (t *Txn) updateEntry(key []byte, v *badger.Entry) {
-	k := string(key)
-	if t.sort {
-		if _, found := t.cache.ops[k]; !found && t.sort {
-			t.addToSorted(string(key))
-		}
-	}
-
+	k := lib.BytesToString(key)
 	valueOp := valueOp{key: key, value: v.Value, valueEntry: v, op: opEntry}
 	t.cache.ops[k] = valueOp
 
 	if t.liveWrite {
 		t.liveWriter.send(valueOp)
 	}
-}
-
-// addToSorted() inserts a key into the sorted list of operations maintaining lexicographical order
-func (t *Txn) addToSorted(key string) {
-	t.cache.sortedLen++
-	t.cache.sorted.ReplaceOrInsert(&CacheItem{Key: key, Exists: true})
 }
 
 // Iterator() returns a new iterator for merged iteration of both the in-memory operations and parent store with the given prefix
@@ -228,7 +226,6 @@ func (t *Txn) ArchiveIterator(prefix []byte) (lib.IteratorI, lib.ErrorI) {
 
 // Discard() clears all in-memory operations and resets the sorted key list
 func (t *Txn) Discard() {
-	t.cache.sorted.Clear(false)
 	t.cache.ops, t.cache.sortedLen = make(map[string]valueOp), 0
 }
 
@@ -310,7 +307,6 @@ var _ lib.IteratorI = &TxnIterator{}
 // TxnIterator is a reversible, merged iterator of the parent and the in-memory operations
 type TxnIterator struct {
 	parent lib.IteratorI
-	tree   *BTreeIterator
 	txn
 	hasNext      bool
 	prefix       string
@@ -323,18 +319,11 @@ type TxnIterator struct {
 
 // newTxnIterator() initializes a new merged iterator for traversing both the in-memory operations and parent store
 func newTxnIterator(parent lib.IteratorI, t txn, parentPrefix, prefix []byte, reverse bool) *TxnIterator {
-	tree := NewBTreeIterator(t.sorted.Clone(),
-		&CacheItem{
-			Key: string(lib.Append(parentPrefix, prefix)),
-		},
-		reverse)
-
 	return (&TxnIterator{
 		parent:       parent,
-		tree:         tree,
 		txn:          t,
-		parentPrefix: string(parentPrefix),
-		prefix:       string(prefix),
+		parentPrefix: lib.BytesToString(parentPrefix),
+		prefix:       lib.BytesToString(prefix),
 		reverse:      reverse,
 	}).First()
 }
@@ -445,12 +434,16 @@ func (ti *TxnIterator) txnInvalid() bool {
 		return ti.invalid
 	}
 	ti.invalid = true
-	current := ti.tree.Current()
-	if current == nil || current.Key == "" {
-		ti.invalid = true
-		return ti.invalid
+	if ti.reverse {
+		if ti.index < 0 {
+			return ti.invalid
+		}
+	} else {
+		if ti.index >= ti.sortedLen {
+			return ti.invalid
+		}
 	}
-	if !strings.HasPrefix(ti.tree.Current().Key, ti.parentPrefix+ti.prefix) {
+	if !strings.HasPrefix(ti.sorted[ti.index], ti.parentPrefix+ti.prefix) {
 		return ti.invalid
 	}
 	ti.invalid = false
@@ -459,13 +452,14 @@ func (ti *TxnIterator) txnInvalid() bool {
 
 // txnKey() returns the key of the current in-memory operation
 func (ti *TxnIterator) txnKey() []byte {
-	return []byte(strings.TrimPrefix(ti.tree.Current().Key, ti.parentPrefix))
+	bKey, _ := lib.StringToBytes(ti.sorted[ti.index])
+	bParentPrefix, _ := lib.StringToBytes(ti.parentPrefix)
+	bKey = bytes.TrimPrefix(bKey, bParentPrefix)
+	return bKey
 }
 
 // txnValue() returns the value of the current in-memory operation
-func (ti *TxnIterator) txnValue() valueOp {
-	return ti.ops[ti.tree.Current().Key]
-}
+func (ti *TxnIterator) txnValue() valueOp { return ti.ops[ti.sorted[ti.index]] }
 
 // compare() compares two byte slices, adjusting for reverse iteration if needed
 func (ti *TxnIterator) compare(a, b []byte) int {
@@ -477,25 +471,28 @@ func (ti *TxnIterator) compare(a, b []byte) int {
 
 // txnNext() advances the index of the in-memory operations based on the iteration direction
 func (ti *TxnIterator) txnNext() {
-	ti.hasNext = ti.tree.HasNext()
-	ti.tree.Next()
+	if ti.reverse {
+		ti.index--
+	} else {
+		ti.index++
+	}
 }
 
 // seek() positions the iterator at the first entry that matches or exceeds the prefix.
 func (ti *TxnIterator) seek() *TxnIterator {
-	ti.tree.Move(&CacheItem{
-		Key: ti.parentPrefix + ti.prefix,
+	ti.index = sort.Search(ti.sortedLen, func(i int) bool {
+		return ti.sorted[i] >= ti.parentPrefix+ti.prefix
 	})
 	return ti
 }
 
 // revSeek() positions the iterator at the last entry that matches the prefix in reverse order.
 func (ti *TxnIterator) revSeek() *TxnIterator {
-	bz := []byte(ti.parentPrefix + ti.prefix)
-	endPrefix := string(prefixEnd(bz))
-	ti.tree.Move(&CacheItem{
-		Key: endPrefix,
-	})
+	bz, _ := lib.StringToBytes(ti.parentPrefix + ti.prefix)
+	endPrefix := lib.BytesToString(prefixEnd(bz))
+	ti.index = sort.Search(ti.sortedLen, func(i int) bool {
+		return ti.sorted[i] >= endPrefix
+	}) - 1
 	return ti
 }
 
