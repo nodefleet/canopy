@@ -265,7 +265,7 @@ func (m *Mempool) applyAndWriteTx(tx []byte) (result *lib.TxResult, err lib.Erro
 		return
 	}
 	// write the transaction to the mempool store
-	if err = txn.Write(); err != nil {
+	if err = txn.Flush(); err != nil {
 		// exit with error
 		return
 	}

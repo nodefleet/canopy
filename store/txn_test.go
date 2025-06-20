@@ -39,7 +39,7 @@ func TestNestedTxn(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, val)
 	// commit the nested transaction
-	require.NoError(t, nested.Write())
+	require.NoError(t, nested.Flush())
 	// check that the changes are visible in the parent transaction
 	val, err = baseTxn.Get([]byte("2/b"))
 	require.NoError(t, err)
@@ -60,7 +60,7 @@ func TestTxnWriteSetGet(t *testing.T) {
 	dbVal, dbErr := test.reader.Get(key)
 	require.NoError(t, dbErr)
 	require.Nil(t, dbVal)
-	require.NoError(t, test.Write())
+	require.NoError(t, test.Flush())
 	require.NoError(t, writer.Flush())
 	// test get from reader after write()
 	require.Len(t, test.cache.ops, 0)
@@ -83,7 +83,7 @@ func TestTxnWriteDelete(t *testing.T) {
 	require.NoError(t, dbErr)
 	require.Nil(t, dbVal)
 	// test get value from reader after write()
-	require.NoError(t, test.Write())
+	require.NoError(t, test.Flush())
 	require.NoError(t, writer.Flush())
 	dbVal, dbErr = test.reader.Get([]byte("1/a"))
 	require.NoError(t, dbErr)
@@ -185,7 +185,7 @@ func TestTxnIterateMixed(t *testing.T) {
 	defer func() { test.Close(); db.Close(); test.Discard() }()
 	// first write to the memory cache and flush it
 	bulkSetKV(t, test, "1/", "f", "e", "d")
-	require.NoError(t, test.Write())
+	require.NoError(t, test.Flush())
 	require.NoError(t, writer.Flush())
 	// now add new entries to the memory cache.
 	// Since the reader and writer are on the same version,
@@ -261,7 +261,7 @@ func TestTxnIterateMixedWithDeletedValues(t *testing.T) {
 	defer func() { test.Close(); db.Close(); test.Discard() }()
 	// first write to the db writer and flush it
 	bulkSetKV(t, test, "1/", "f", "e", "d")
-	require.NoError(t, test.Write())
+	require.NoError(t, test.Flush())
 	require.NoError(t, writer.Flush())
 	// now add new entries to the memory cache.
 	// Since the reader and writer are on the same version,
@@ -312,7 +312,7 @@ func TestIteratorBasic(t *testing.T) {
 	expectedVals := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
 	expectedValsReverse := []string{"h", "g", "f", "e", "d", "c", "b", "a"}
 	bulkSetKV(t, test, "", expectedVals...)
-	require.NoError(t, test.Write())
+	require.NoError(t, test.Flush())
 	require.NoError(t, writer.Flush())
 	it, err := test.Iterator(nil)
 	require.NoError(t, err)
@@ -425,9 +425,9 @@ func TestLiveWriteVsNormalWrite(t *testing.T) {
 		require.NoError(t, txn2.Delete([]byte(k)))
 	}
 
-	// call Write on both transactions
-	require.NoError(t, txn1.Write())
-	require.NoError(t, txn2.Write())
+	// call Flush on both transactions
+	require.NoError(t, txn1.Flush())
+	require.NoError(t, txn2.Flush())
 
 	// flush writers explicitly
 	require.NoError(t, writer1.Flush())

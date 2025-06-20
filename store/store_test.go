@@ -43,8 +43,6 @@ func TestMaxTransaction(t *testing.T) {
 		}
 	}
 	require.NoError(t, tx.CommitAt(1, nil))
-	require.NoError(t, FlushMemTable(db))
-	require.NoError(t, db.Flatten(1))
 }
 
 func numberToBytes(n int) []byte {

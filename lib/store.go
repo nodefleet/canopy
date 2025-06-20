@@ -22,7 +22,7 @@ type StoreI interface {
 	Discard()                                    // discard the underlying writer
 	Reset()                                      // reset the underlying writer
 	Close() ErrorI                               // gracefully stop the database
-	Write() ErrorI
+	Flush() ErrorI                               // flush all operations to the underlying 'writer' without committing
 }
 
 // ReadOnlyStoreI defines a Read-Only interface for accessing the blockchain storage including membership and non-membership proofs

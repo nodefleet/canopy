@@ -77,7 +77,7 @@ func doRandomOperation(t *testing.T, db lib.RWStoreI, compare lib.RWStoreI, keys
 		if x, ok := db.(TxnWriterI); ok {
 			switch math.Intn(10) {
 			case 0:
-				require.NoError(t, x.Write())
+				require.NoError(t, x.Flush())
 			}
 		}
 	case CommitTesting:
