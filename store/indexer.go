@@ -7,6 +7,7 @@ import (
 
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
+	"github.com/hashicorp/golang-lru/v2"
 )
 
 var _ lib.RWIndexerI = &Indexer{}
@@ -25,7 +26,9 @@ var (
 
 // Indexer: the part of the DB that stores transactions, blocks, and quorum certificates
 type Indexer struct {
-	db *Txn
+	db         *Txn
+	blockCache *lru.Cache[uint64, *lib.BlockResult]
+	qcCache    *lru.Cache[uint64, *lib.QuorumCertificate]
 }
 
 // BLOCKS CODE BELOW
@@ -33,6 +36,8 @@ type Indexer struct {
 // IndexBlock() turns the block into bytes, indexes the block by hash and height
 // and then indexes the transactions
 func (t *Indexer) IndexBlock(b *lib.BlockResult) lib.ErrorI {
+	// save to cache
+	t.blockCache.Add(b.BlockHeader.Height, b)
 	// convert the header to bytes
 	bz, err := lib.Marshal(b.BlockHeader)
 	if err != nil {
@@ -58,6 +63,8 @@ func (t *Indexer) IndexBlock(b *lib.BlockResult) lib.ErrorI {
 
 // DeleteBlockForHeight() deletes the block & transaction data for a certain height
 func (t *Indexer) DeleteBlockForHeight(height uint64) lib.ErrorI {
+	// remove from cache
+	t.blockCache.Remove(height)
 	// get the height key
 	heightKey := t.blockHeightKey(height)
 	// get the hash key (was indexed by height key)
@@ -84,6 +91,10 @@ func (t *Indexer) GetBlockByHash(hash []byte) (*lib.BlockResult, lib.ErrorI) {
 
 // GetBlockByHeight() returns the block result by height key
 func (t *Indexer) GetBlockByHeight(height uint64) (*lib.BlockResult, lib.ErrorI) {
+	// check cache
+	if got, found := t.blockCache.Get(height); found {
+		return got, nil
+	}
 	// height key points to hash key
 	hashKey, err := t.db.Get(t.blockHeightKey(height))
 	if err != nil {
@@ -95,6 +106,10 @@ func (t *Indexer) GetBlockByHeight(height uint64) (*lib.BlockResult, lib.ErrorI)
 
 // GetBlockHeaderByHeight() returns the block result without transactions
 func (t *Indexer) GetBlockHeaderByHeight(height uint64) (*lib.BlockResult, lib.ErrorI) {
+	// check cache
+	if got, found := t.blockCache.Get(height); found {
+		return got, nil
+	}
 	// height key points to hash key
 	hashKey, err := t.db.Get(t.blockHeightKey(height))
 	if err != nil {
@@ -138,6 +153,9 @@ func (t *Indexer) GetBlocks(p lib.PageParams) (page *lib.Page, err lib.ErrorI) {
 
 // IndexQC() indexes the quorum certificate by height
 func (t *Indexer) IndexQC(qc *lib.QuorumCertificate) lib.ErrorI {
+	// add to cache
+	t.qcCache.Add(qc.Header.Height, qc)
+	// convert to bytes
 	bz, err := lib.Marshal(&lib.QuorumCertificate{
 		Header:      qc.Header,
 		Results:     qc.Results,
@@ -154,6 +172,10 @@ func (t *Indexer) IndexQC(qc *lib.QuorumCertificate) lib.ErrorI {
 
 // GetQCByHeight() returns the quorum certificate by height key
 func (t *Indexer) GetQCByHeight(height uint64) (*lib.QuorumCertificate, lib.ErrorI) {
+	// check cache
+	if qc, found := t.qcCache.Get(height); found {
+		return qc, nil
+	}
 	// unlike blocks, QCs are stored by hash key
 	qc, err := t.getQC(t.qcHeightKey(height))
 	if err != nil {
@@ -179,6 +201,7 @@ func (t *Indexer) GetQCByHeight(height uint64) (*lib.QuorumCertificate, lib.Erro
 
 // DeleteQCForHeight() deletes the Quorum Certificate by height
 func (t *Indexer) DeleteQCForHeight(height uint64) lib.ErrorI {
+	t.qcCache.Remove(height)
 	return t.db.Delete(t.qcHeightKey(height))
 }
 

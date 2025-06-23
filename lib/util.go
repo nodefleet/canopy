@@ -738,7 +738,7 @@ func TimeTrack(l LoggerI, start time.Time) {
 			break
 		}
 	}
-	l.Debugf("%s took %s", functionName, elapsed)
+	l.Warnf("%s took %s", functionName, elapsed)
 }
 
 func PrintStackTrace() {

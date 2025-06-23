@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"container/list"
 	"errors"
 	"github.com/canopy-network/canopy/lib/crypto"
 	"github.com/stretchr/testify/require"
@@ -94,7 +95,7 @@ func TestAddTransaction(t *testing.T) {
 			mempool: FeeMempool{
 				l:        sync.RWMutex{},
 				hashMap:  make(map[string]struct{}),
-				pool:     MempoolTxs{},
+				pool:     MempoolTxs{count: 0, l: list.New(), m: make(map[string]*list.Element)},
 				count:    0,
 				txsBytes: 0,
 				config: MempoolConfig{
@@ -113,7 +114,7 @@ func TestAddTransaction(t *testing.T) {
 			mempool: FeeMempool{
 				l:        sync.RWMutex{},
 				hashMap:  make(map[string]struct{}),
-				pool:     MempoolTxs{},
+				pool:     MempoolTxs{count: 0, l: list.New(), m: make(map[string]*list.Element)},
 				count:    0,
 				txsBytes: 0,
 				config: MempoolConfig{
@@ -132,7 +133,7 @@ func TestAddTransaction(t *testing.T) {
 			mempool: FeeMempool{
 				l:       sync.RWMutex{},
 				hashMap: make(map[string]struct{}),
-				pool:    MempoolTxs{},
+				pool:    MempoolTxs{count: 0, l: list.New(), m: make(map[string]*list.Element)},
 				count:   0,
 				config: MempoolConfig{
 					MaxTotalBytes:       math.MaxUint64,
@@ -153,7 +154,7 @@ func TestAddTransaction(t *testing.T) {
 			mempool: FeeMempool{
 				l:       sync.RWMutex{},
 				hashMap: make(map[string]struct{}),
-				pool:    MempoolTxs{},
+				pool:    MempoolTxs{count: 0, l: list.New(), m: make(map[string]*list.Element)},
 				count:   0,
 				config: MempoolConfig{
 					MaxTotalBytes:       math.MaxUint64,
@@ -334,23 +335,22 @@ func TestDeleteTransaction(t *testing.T) {
 			detail: "delete the transaction with the highest fee",
 			mempool: &FeeMempool{
 				l: sync.RWMutex{},
-				pool: MempoolTxs{
-					count: 3,
-					s: []MempoolTx{
-						{
-							Tx:  []byte("b"),
-							Fee: 1001,
-						},
-						{
-							Tx:  []byte("a"),
-							Fee: 1000,
-						},
-						{
-							Tx:  []byte("c"),
-							Fee: 999,
-						},
-					},
-				},
+				pool: func() MempoolTxs {
+					m := MempoolTxs{count: 0, l: list.New(), m: make(map[string]*list.Element)}
+					m.insert(MempoolTx{
+						Tx:  []byte("b"),
+						Fee: 1001,
+					})
+					m.insert(MempoolTx{
+						Tx:  []byte("a"),
+						Fee: 1000,
+					})
+					m.insert(MempoolTx{
+						Tx:  []byte("c"),
+						Fee: 999,
+					})
+					return m
+				}(),
 				hashMap: map[string]struct{}{
 					crypto.HashString([]byte("a")): {},
 					crypto.HashString([]byte("b")): {},
@@ -383,23 +383,22 @@ func TestDeleteTransaction(t *testing.T) {
 			detail: "delete the 2 transactions with the lowest fees",
 			mempool: &FeeMempool{
 				l: sync.RWMutex{},
-				pool: MempoolTxs{
-					count: 3,
-					s: []MempoolTx{
-						{
-							Tx:  []byte("b"),
-							Fee: 1001,
-						},
-						{
-							Tx:  []byte("a"),
-							Fee: 1000,
-						},
-						{
-							Tx:  []byte("c"),
-							Fee: 999,
-						},
-					},
-				},
+				pool: func() MempoolTxs {
+					m := MempoolTxs{count: 0, l: list.New(), m: make(map[string]*list.Element)}
+					m.insert(MempoolTx{
+						Tx:  []byte("b"),
+						Fee: 1001,
+					})
+					m.insert(MempoolTx{
+						Tx:  []byte("a"),
+						Fee: 1000,
+					})
+					m.insert(MempoolTx{
+						Tx:  []byte("c"),
+						Fee: 999,
+					})
+					return m
+				}(),
 				hashMap: map[string]struct{}{
 					crypto.HashString([]byte("a")): {},
 					crypto.HashString([]byte("b")): {},

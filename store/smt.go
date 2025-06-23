@@ -6,6 +6,7 @@ import (
 
 	"math/bits"
 	"sort"
+	"sync"
 
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
@@ -153,7 +154,9 @@ type SMT struct {
 	unsortedOps map[string]*node
 	// OpData: data for each operation
 	OpData
-
+	// define reserved keys
+	minKey    *key
+	maxKey    *key
 	statsChan chan SMTStat
 	stat      SMTStat
 }
@@ -205,6 +208,8 @@ func NewSMT(rootKey []byte, keyBitLen int, store lib.RWStoreI) (smt *SMT) {
 		keyBitLength: keyBitLen,
 		statsChan:    make(chan SMTStat),
 		nodeCache:    make(map[string]*node, MaxCacheSize),
+		minKey:       newNodeKey(bytes.Repeat([]byte{0}, 20), keyBitLen),
+		maxKey:       newNodeKey(bytes.Repeat([]byte{255}, 20), keyBitLen),
 	}
 	go smt.logData()
 	// ensure the root key is the proper length based on the bit count
@@ -329,10 +334,69 @@ func (s *SMT) delete() lib.ErrorI {
 	return s.delNode(targetBytes)
 }
 
-// Commit(): executes the deferred operations in order (left-to-right),
-// minimizing the amount of traversals, IOPS, and hash operations
+// Commit(): executes deferred operations in order (left-to-right),
+// minimizing the amount of traversals, IOPS, and hash operations over the master tree
+// this is the sequential alternative to 'commit parallel'
 func (s *SMT) Commit() (err lib.ErrorI) {
 	s.sortOperations()
+	return s.commit(false)
+}
+
+// CommitParallel(): sorts the operations in 8 subtree threads, executes those threads in parallel and combines them into the master tree
+func (s *SMT) CommitParallel(unsortedOps map[string]valueOp) (err lib.ErrorI) {
+	// add 16 synthetic borders to the tree
+	cleanup, err := s.addSyntheticBorders()
+	// collect the roots for each group (000, 001, 010, 011...)
+	roots := make([]*node, 8)
+	for i := uint8(0); i < 8; i++ {
+		if roots[i], err = s.getNode(newNodeKey([]byte{i << 5}, 3).key); err != nil {
+			return
+		}
+	}
+	// sort operations grouping by prefix
+	groupedByPrefix, err := s.sortOperationsByPrefix(unsortedOps)
+	if err != nil {
+		return
+	}
+	// create parallel ops
+	wg, eChan := sync.WaitGroup{}, make(chan lib.ErrorI, 8)
+	// commit each group in parallel
+	for i := 0; i < 8; i++ {
+		// create the subtree SMT
+		smt := &SMT{
+			store:        s.store,
+			root:         roots[i],
+			keyBitLength: s.keyBitLength,
+			nodeCache:    make(map[string]*node),
+			operations:   groupedByPrefix[i],
+			minKey:       s.minKey,
+			maxKey:       s.maxKey,
+		}
+		wg.Add(1)
+		go func(smt *SMT) {
+			defer wg.Done()
+			smt.reset()
+			// commit the subtree
+			if err = smt.commit(true); err != nil {
+				eChan <- err
+			}
+		}(smt)
+	}
+	// wait for all goroutines to finish
+	wg.Wait()
+	close(eChan)
+	// check if any errors occurred
+	for err = range eChan {
+		if err != nil {
+			return
+		}
+	}
+	return cleanup()
+}
+
+// commit(): executes the deferred operations in order (left-to-right),
+// minimizing the amount of traversals, IOPS, and hash operations
+func (s *SMT) commit(subTree bool) (err lib.ErrorI) {
 	for {
 		// if no operations and at root - exit
 		if len(s.operations) == 0 && len(s.traversed.Nodes) == 0 {
@@ -342,8 +406,8 @@ func (s *SMT) Commit() (err lib.ErrorI) {
 		s.target, s.operations = s.operations[0], s.operations[1:]
 		// reset path variables
 		s.resetGCP()
-		// if not at root
-		if len(s.traversed.Nodes) != 0 {
+		// if not at main tree root
+		if subTree || len(s.traversed.Nodes) != 0 {
 			// update the greatest common prefix and the bit position based on the new current key
 			s.target.Key.greatestCommonPrefix(&s.bitPos, s.gcp, s.current.Key)
 		}
@@ -518,6 +582,81 @@ func (s *SMT) updateParentValue(parent *node) (err lib.ErrorI) {
 	return
 }
 
+// addSyntheticBorders() injects 16 'synthetic' border nodes into the tree to allow safe recursion of the commit function
+// the 16 nodes are removed by calling 'cleanup' at the end of the function. This is useful for parallelization
+func (s *SMT) addSyntheticBorders() (cleanup func() lib.ErrorI, err lib.ErrorI) {
+	saved := []*node(nil)
+	// generate borders
+	borders := make([]*node, 0, 16)
+	for i := 0; i < 8; i++ {
+		// add synthetic borders: low and high of each prefix range
+		low, high := s.generatePrefixRange(uint8(i), s.keyBitLength)
+		// don't add low range at 0 (already there during tree initialization)
+		if i != 0 {
+			borders = append(borders, &node{Key: low, Node: lib.Node{Value: []byte{0}}})
+		}
+		// don't add high range at end border (already there during tree initialization)
+		if i != 7 {
+			borders = append(borders, &node{Key: high, Node: lib.Node{Value: []byte{0}}})
+		}
+	}
+	// save actual operations
+	saved, s.operations = s.operations, borders
+	// commit the borders
+	if err = s.commit(false); err != nil {
+		return
+	}
+	// reset the operations
+	s.operations = saved
+	// define a cleanup function to remove the borders
+	cleanup = func() lib.ErrorI {
+		// reset the SMT
+		s.reset()
+		// execute over the borders and create 'delete' operations
+		s.operations, s.nodeCache = make([]*node, len(borders)), make(map[string]*node)
+		for i, n := range borders {
+			s.operations[i] = &node{Key: n.Key, delete: true}
+		}
+		// remove synthetic borders
+		return s.commit(false)
+	}
+	return
+}
+
+// sortOperationsByPrefix returns 8 sorted slices grouped by 3-bit prefix: 000 to 111
+func (s *SMT) sortOperationsByPrefix(unsortedOps map[string]valueOp) (groups [8][]*node, err lib.ErrorI) {
+	for _, operation := range unsortedOps {
+		value, del := []byte(nil), true
+		if operation.op != opDelete {
+			value, del = crypto.Hash(operation.value), false
+		}
+		n := &node{Key: newNodeKey(crypto.Hash(operation.key), s.keyBitLength), Node: lib.Node{Value: value}, delete: del}
+		// check to make sure the target is valid
+		if err = s.validateTarget(n); err != nil {
+			return
+		}
+		prefix := n.Key.key[0] >> 5 // extract top 3 bits
+		groups[prefix] = append(groups[prefix], n)
+	}
+	// sort each group
+	for i := range groups {
+		sort.Slice(groups[i], func(a, b int) bool {
+			return groups[i][a].Key.cmp(groups[i][b].Key) < 0
+		})
+	}
+	return
+}
+
+// generatePrefixRange() generates a 20 byte key that acts as the 'borders' for a 3 bit prefix
+// example: prefix 0 bitCount 4 returns 0000 and 0111
+func (s *SMT) generatePrefixRange(prefix uint8, bitCount int) (*key, *key) {
+	// 3-bit prefix shifted into top bits of first byte
+	base := (prefix & 0x07) << 5
+	low := append([]byte{base}, make([]byte, 19)...)
+	high := append([]byte{base | 0x1F}, bytes.Repeat([]byte{0xFF}, 19)...)
+	return newNodeKey(low, bitCount), newNodeKey(high, bitCount)
+}
+
 // reset() resets data for each operation
 func (s *SMT) reset() {
 	s.current, s.traversed = s.root.copy(), &NodeList{Nodes: make([]*node, 0)}
@@ -581,10 +720,10 @@ func (s *SMT) validateTarget(n *node) lib.ErrorI {
 	if bytes.Equal(s.root.Key.bytes(), n.Key.bytes()) {
 		return ErrReserveKeyWrite("root")
 	}
-	if bytes.Equal(newNodeKey(bytes.Repeat([]byte{0}, 20), s.keyBitLength).bytes(), n.Key.bytes()) {
+	if bytes.Equal(s.minKey.bytes(), n.Key.bytes()) {
 		return ErrReserveKeyWrite("minimum")
 	}
-	if bytes.Equal(newNodeKey(bytes.Repeat([]byte{255}, 20), s.keyBitLength).bytes(), n.Key.bytes()) {
+	if bytes.Equal(s.maxKey.bytes(), n.Key.bytes()) {
 		return ErrReserveKeyWrite("maximum")
 	}
 	return nil

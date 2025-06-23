@@ -79,7 +79,7 @@ func (c *Controller) ListenForTx() {
 				return
 			}
 			// log the receipt of the valid transaction
-			c.log.Infof("Received valid transaction %s from %s for chain %d", crypto.ShortHashString(txMsg.Tx), lib.BytesToTruncatedString(senderID), txMsg.ChainId)
+			c.log.Debugf("Received valid transaction %s from %s for chain %d", crypto.ShortHashString(txMsg.Tx), lib.BytesToTruncatedString(senderID), txMsg.ChainId)
 			// bump peer reputation positively
 			c.P2P.ChangeReputation(senderID, p2p.GoodTxRep)
 			// gossip the transaction to peers
@@ -189,7 +189,7 @@ func (m *Mempool) HandleTransaction(tx []byte) (err lib.ErrorI) {
 		return
 	}
 	// cache the results for RPC display
-	m.log.Infof("Added tx %s to mempool for checking", crypto.HashString(tx))
+	m.log.Debugf("Added tx %s to mempool for checking", crypto.HashString(tx))
 	// add the result to the cache
 	m.cachedResults = append(m.cachedResults, result)
 	// recheck the mempool if necessary
@@ -256,7 +256,7 @@ func (m *Mempool) applyAndWriteTx(tx []byte) (result *lib.TxResult, err lib.Erro
 		return
 	}
 	// at the end of this code, set the state machine store back to the 'ephemeral store' and discard the 'database transaction'
-	defer func() { m.FSM.SetStore(store); txn.Discard() }()
+	defer func() { m.FSM.SetStore(store) }()
 	// apply the transaction to the mempool (ephemeral copy) state machine
 	result, err = m.FSM.ApplyTransaction(uint64(m.TxCount()), tx, crypto.HashString(tx))
 	// if an error occurred when applying the transaction

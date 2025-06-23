@@ -57,6 +57,7 @@ func New(c lib.Config, store lib.StoreI, metrics *lib.Metrics, log lib.LoggerI) 
 			delegates:  make(map[uint64]map[crypto.AddressI]struct{}),
 		},
 	}
+	defer sm.Reset()
 	// initialize the state machine and exit
 	return sm, sm.Initialize(store)
 }

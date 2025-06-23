@@ -18,6 +18,7 @@ func TestFuzzMultiSet(t *testing.T) {
 	iterations := 1000
 	// create a new SMT
 	smt1, memStore := NewTestSMT(t, nil, nil, 160)
+	unsortedOps := make(map[string]valueOp)
 	// close the store when done
 	defer memStore.Close()
 	// create a compare SMT
@@ -33,8 +34,8 @@ func TestFuzzMultiSet(t *testing.T) {
 		// 50% of the time do a set
 		if rand.Intn(2) == 0 {
 			keys = append(keys, random)
-			require.NoError(t, smt1.Set(random, random))
 			require.NoError(t, smt2.Set(random, random))
+			unsortedOps[string(random)] = valueOp{key: random, value: random, op: opSet}
 		} else {
 			toDelete := random
 			if rand.Intn(2) == 0 {
@@ -47,14 +48,14 @@ func TestFuzzMultiSet(t *testing.T) {
 				}
 			}
 			// 50% of the time do a delete
-			require.NoError(t, smt1.Delete(toDelete))
 			require.NoError(t, smt2.Delete(toDelete))
+			unsortedOps[string(toDelete)] = valueOp{key: toDelete, op: opDelete}
 		}
 		// for smt 2 commit everytime
 		require.NoError(t, smt2.Commit())
 	}
 	// commit smt 1
-	require.NoError(t, smt1.Commit())
+	require.NoError(t, smt1.CommitParallel(unsortedOps))
 	// compare roots between the two smts
 	require.Equal(t, smt1.Root(), smt2.Root())
 }
@@ -2021,7 +2022,7 @@ func NewTestSMT(t *testing.T, preset *NodeList, root []byte, keyBitSize int) (*S
 	// make a writable reader that reads from the last height
 	reader := db.NewTransactionAt(1, true)
 	writer := db.NewWriteBatchAt(1)
-	memStore := NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), false, 1, false, lib.NewDefaultLogger())
+	memStore := NewBadgerTxn(reader, writer, []byte(stateCommitmentPrefix), false, false, 1, lib.NewDefaultLogger())
 	// if there's no preset - use the default 3 nodes
 	if preset == nil {
 		if root != nil {
@@ -2034,8 +2035,10 @@ func NewTestSMT(t *testing.T, preset *NodeList, root []byte, keyBitSize int) (*S
 		store:        memStore,
 		keyBitLength: keyBitSize,
 		nodeCache:    make(map[string]*node, MaxCacheSize),
-		OpData:       OpData{},
 		unsortedOps:  make(map[string]*node),
+		OpData:       OpData{},
+		minKey:       newNodeKey(bytes.Repeat([]byte{byte(0)}, 20), keyBitSize),
+		maxKey:       newNodeKey(bytes.Repeat([]byte{byte(255)}, 20), keyBitSize),
 	}
 	// update root
 	smt.root = preset.Nodes[0]

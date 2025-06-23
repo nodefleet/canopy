@@ -1,10 +1,9 @@
 package lib
 
 import (
-	"bytes"
+	"container/list"
 	"github.com/canopy-network/canopy/lib/crypto"
 	"slices"
-	"sort"
 	"sync"
 	"time"
 )
@@ -53,8 +52,12 @@ func NewMempool(config MempoolConfig) Mempool {
 	return &FeeMempool{
 		l:       sync.RWMutex{},
 		hashMap: make(map[string]struct{}),
-		pool:    MempoolTxs{s: make([]MempoolTx, 0)},
-		config:  config,
+		pool: MempoolTxs{
+			count: 0,
+			l:     list.New(),
+			m:     make(map[string]*list.Element),
+		},
+		config: config,
 	}
 }
 
@@ -117,9 +120,11 @@ func (f *FeeMempool) GetTransactions(maxBytes uint64) (txs [][]byte) {
 	// create a variable to track the total transaction byte count
 	totalBytes := uint64(0)
 	// for each transaction in the pool
-	for _, tx := range f.pool.s {
+	for e := f.pool.l.Front(); e != nil; e = e.Next() {
+		// cast the item
+		item := e.Value.(MempoolTx)
 		// get the size of the transaction in bytes
-		txSize := len(tx.Tx)
+		txSize := len(item.Tx)
 		// add to the total bytes
 		totalBytes += uint64(txSize)
 		// check to see if the addition of this transaction
@@ -129,7 +134,7 @@ func (f *FeeMempool) GetTransactions(maxBytes uint64) (txs [][]byte) {
 			return
 		}
 		// add the tx to the list and increment totalTxs
-		txs = append(txs, tx.Tx)
+		txs = append(txs, item.Tx)
 	}
 	// exit
 	return
@@ -175,7 +180,11 @@ func (f *FeeMempool) Clear() {
 	// unlock when the function completes
 	defer f.l.Unlock()
 	// reset the memory pool of transactions
-	f.pool = MempoolTxs{s: make([]MempoolTx, 0)}
+	f.pool = MempoolTxs{
+		count: 0,
+		l:     list.New(),
+		m:     make(map[string]*list.Element),
+	}
 	// reset the hash map
 	f.hashMap = make(map[string]struct{})
 	// reset the count
@@ -214,25 +223,25 @@ var _ IteratorI = &mempoolIterator{} // enforce
 
 // mempoolIterator implements IteratorI using the list of Transactions the index and if the position is valid
 type mempoolIterator struct {
-	pool  *MempoolTxs // reference to list of Transactions
-	index int         // index position
-	valid bool        // is the position valid
+	pool    *MempoolTxs   // reference to list of Transactions
+	current *list.Element // the current element
 }
 
 // NewMempoolIterator() initializes a new iterator for the mempool transactions
 func NewMempoolIterator(p MempoolTxs) *mempoolIterator {
 	pool := p.copy() // copy the pool for safe iteration during a parallel
-	return &mempoolIterator{pool: pool, valid: pool.count != 0}
+	current := pool.l.Front()
+	return &mempoolIterator{pool: pool, current: current}
 }
 
 // Valid() checks if the iterator is positioned on a valid element
-func (m *mempoolIterator) Valid() bool { return m.index < m.pool.count }
+func (m *mempoolIterator) Valid() bool { return m.current != nil }
 
 // Next() advances the iterator to the next transaction in the pool
-func (m *mempoolIterator) Next() { m.index++ }
+func (m *mempoolIterator) Next() { m.current = m.current.Next() }
 
 // Key() returns the transaction at the current iterator position
-func (m *mempoolIterator) Key() (key []byte) { return m.pool.s[m.index].Tx }
+func (m *mempoolIterator) Key() (key []byte) { return m.current.Value.(MempoolTx).Tx }
 
 // Value() returns same as key
 func (m *mempoolIterator) Value() (value []byte) { return m.Key() }
@@ -246,88 +255,100 @@ func (m *mempoolIterator) Close() {}
 // MempoolTxs is a list of MempoolTxs with a count
 type MempoolTxs struct {
 	count int
-	s     []MempoolTx
+	l     *list.List               // Doubly linked list
+	m     map[string]*list.Element // txHash -> list element
 }
 
 // insert() inserts a new tx into the list sorted by the highest fee to the lowest fee
 func (t *MempoolTxs) insert(tx MempoolTx) (recheck bool) {
-	// The comparison t.s[i].Fee < tr.Fee ensures that the search returns the first position
-	// where the fee is less than the transaction being inserted. This places transactions with
-	// higher fees at the beginning of the slice
-	i := sort.Search(t.count, func(i int) bool {
-		return t.s[i].Fee < tx.Fee
-	})
-	// if insert position isn't at the end
-	// there is a re-org which requires rechecking
-	// of all Transactions in the list
-	if i != t.count {
-		recheck = true
+	// initialization sanity check
+	if t.l == nil {
+		t.l = list.New()
+		t.m = make(map[string]*list.Element)
 	}
-	// add an empty slot to the slice
-	t.s = append(t.s, MempoolTx{})
-	// move everything to the right of
-	// the insert point one over
-	copy(t.s[i+1:], t.s[i:])
-	// insert the new tx
-	t.s[i] = tx
-	// increment the count
+	// increment count
 	t.count++
-	// exit
-	return
-}
-
-// delete() evicts a transaction from the list and re-order based on the fee
-func (t *MempoolTxs) delete(tx []byte) (deleted MempoolTx) {
-	// set a variable to track the index to delete
-	index := t.count
-	// for each item in the mempool
-	for i := 0; i < t.count; i++ {
-		// if candidate == target
-		if bytes.Equal(t.s[i].Tx, tx) {
-			// set index
-			index = i
-			// exit loop
-			break
+	// get a key for the tx
+	k := string(tx.Tx)
+	// start from the back and scan backwards
+	for e := t.l.Back(); e != nil; e = e.Prev() {
+		if e.Value.(MempoolTx).Fee >= tx.Fee {
+			// insert after this element
+			t.m[k] = t.l.InsertAfter(tx, e)
+			return t.m[k] != t.l.Back() && t.count != 1
 		}
 	}
-	// transaction not found
-	if index == t.count {
-		// exit
+	// if we got here, tx has the highest fee: insert at front
+	t.m[k] = t.l.PushFront(tx)
+	// return if recheck required
+	return t.m[k] != t.l.Back() && t.count != 1
+}
+
+func (t *MempoolTxs) delete(tx []byte) (deleted MempoolTx) {
+	// check if exists
+	elem, exists := t.m[string(tx)]
+	if !exists {
 		return
 	}
-	// set the evicted
-	deleted = t.s[index]
-	// remove it from the list
-	t.s = append(t.s[:index], t.s[index+1:]...)
+	// delete the element from the list
+	t.l.Remove(elem)
+	// remove from map
+	delete(t.m, string(tx))
 	// decrement the count
 	t.count--
-	// exit
-	return
+	// return the element
+	return elem.Value.(MempoolTx)
 }
 
 // drop() removes the bottom (the lowest fee) X percent of Transactions
 func (t *MempoolTxs) drop(percent int) (dropped []MempoolTx) {
+	if t.count == 0 || percent <= 0 {
+		return nil
+	}
 	// calculate the percent using integer division
 	numDrop := (t.count*percent)/100 + 1
 	// decrement count by number evicted
 	t.count -= numDrop
-	// save the evicted list
-	dropped = t.s[t.count:]
-	// update the list with what's not evicted
-	t.s = t.s[:t.count]
+	// start at the back
+	current := t.l.Back()
+	// reverse iterate 'num to drop'
+	for i := 0; i < numDrop && current != nil; i++ {
+		// maintain a pointer to the next item (previous)
+		prev := current.Prev()
+		// cast the transaction
+		tx := current.Value.(MempoolTx)
+		// remove from the list
+		t.l.Remove(current)
+		// delete from the map
+		delete(t.m, string(tx.Tx))
+		// decrement the count
+		t.count--
+		// save dropped
+		dropped = append(dropped, tx)
+		// set previous to current
+		current = prev
+	}
 	return
 }
 
 // copy() returns a shallow copy of the MempoolTxs
 func (t *MempoolTxs) copy() *MempoolTxs {
-	// allocate a destination
-	dst := make([]MempoolTx, t.count)
-	// shallow copy the source to destination
-	copy(dst, t.s)
-	// exit with copy
+	newList := list.New()
+	newMap := make(map[string]*list.Element)
+	// iterate through all the items
+	for e := t.l.Front(); e != nil; e = e.Next() {
+		// cast it
+		tx := e.Value.(MempoolTx)
+		// push it to the new list
+		elem := newList.PushBack(tx)
+		// add to the map
+		newMap[string(tx.Tx)] = elem
+	}
+	// exit with new structure
 	return &MempoolTxs{
+		l:     newList,
+		m:     newMap,
 		count: t.count,
-		s:     dst,
 	}
 }
 

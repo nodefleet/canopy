@@ -3,6 +3,8 @@ package controller
 import (
 	"bytes"
 	"math/rand"
+	"os"
+	"runtime/pprof"
 	"time"
 
 	"github.com/canopy-network/canopy/p2p"
@@ -124,6 +126,7 @@ func (c *Controller) SelfSendBlock(certificate *lib.QuorumCertificate) {
 
 // ProduceProposal() create a proposal in the form of a `block` and `certificate result` for the bft process
 func (c *Controller) ProduceProposal(evidence *bft.ByzantineEvidence, vdf *crypto.VDF) (blockBytes []byte, results *lib.CertificateResult, err lib.ErrorI) {
+	defer lib.TimeTrack(c.log, time.Now())
 	c.log.Debugf("Producing proposal as leader")
 	// configure the FSM in 'consensus mode' for validator proposals
 	resetProposalConfig := c.SetFSMInConsensusModeForProposals()
@@ -145,7 +148,7 @@ func (c *Controller) ProduceProposal(evidence *bft.ByzantineEvidence, vdf *crypt
 		}
 	}
 	// re-validate all transactions in the mempool as a 'double check' to ensure all transactions being proposed are valid
-	c.Mempool.checkMempool()
+	//c.Mempool.checkMempool()
 	// get the maximum possible size of the block as defined by the governance parameters of the state machine
 	maxBlockSize, err := c.FSM.GetMaxBlockSize()
 	if err != nil {
@@ -181,6 +184,7 @@ func (c *Controller) ProduceProposal(evidence *bft.ByzantineEvidence, vdf *crypt
 
 // ValidateProposal() fully validates a proposal in the form of a quorum certificate and resets back to begin block state
 func (c *Controller) ValidateProposal(qc *lib.QuorumCertificate, evidence *bft.ByzantineEvidence) (err lib.ErrorI) {
+	defer lib.TimeTrack(c.log, time.Now())
 	// log the beginning of proposal validation
 	c.log.Debugf("Validating proposal from leader")
 	// configure the FSM in 'consensus mode' for validator proposals
@@ -223,7 +227,13 @@ func (c *Controller) ValidateProposal(qc *lib.QuorumCertificate, evidence *bft.B
 // - atomically writes all to the underlying db
 // - sets up the controller for the next height
 func (c *Controller) CommitCertificate(qc *lib.QuorumCertificate, block *lib.Block) (err lib.ErrorI) {
+	defer lib.TimeTrack(c.log, time.Now())
 	start := time.Now()
+	f, _ := os.Create("canopy.prof")
+	defer f.Close()
+	if err := pprof.StartCPUProfile(f); err != nil {
+		panic(err)
+	}
 	// reset the store once this code finishes; if code execution gets to `store.Commit()` - this will effectively be a noop
 	defer func() { c.FSM.Reset() }()
 	// log the beginning of the commit
@@ -310,6 +320,7 @@ func (c *Controller) CommitCertificate(qc *lib.QuorumCertificate, block *lib.Blo
 	// update telemetry (using proper defer to ensure time.Since is evaluated at defer execution)
 	processingTime := time.Since(start)
 	defer c.UpdateTelemetry(qc, block, processingTime)
+	pprof.StopCPUProfile()
 	// exit
 	return
 }

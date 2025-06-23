@@ -32,7 +32,7 @@ func TestFuzz(t *testing.T) {
 	defer cleanup()
 	defer db.Close()
 	keys := make([]string, 0)
-	compareStore := NewBadgerTxn(db.NewTransactionAt(lssVersion, true), db.NewWriteBatchAt(1), []byte(latestStatePrefix), true, 1, false, nil)
+	compareStore := NewBadgerTxn(db.NewTransactionAt(lssVersion, true), db.NewWriteBatchAt(1), []byte(latestStatePrefix), false, true, 1, nil)
 	for range 1000 {
 		doRandomOperation(t, store, compareStore, &keys)
 	}
@@ -44,7 +44,7 @@ func TestFuzzTxn(t *testing.T) {
 	require.NoError(t, err)
 	store, err := NewStoreInMemory(lib.NewDefaultLogger())
 	keys := make([]string, 0)
-	compareStore := NewBadgerTxn(db.NewTransactionAt(lssVersion, true), db.NewWriteBatchAt(1), []byte(latestStatePrefix), true, 1, false, nil)
+	compareStore := NewBadgerTxn(db.NewTransactionAt(lssVersion, true), db.NewWriteBatchAt(1), []byte(latestStatePrefix), false, true, 1, nil)
 	for range 1000 {
 		doRandomOperation(t, store, compareStore, &keys)
 	}
@@ -52,7 +52,7 @@ func TestFuzzTxn(t *testing.T) {
 }
 
 func doRandomOperation(t *testing.T, db lib.RWStoreI, compare lib.RWStoreI, keys *[]string) {
-	k, v := getRandomBytes(t, math.Intn(4)), getRandomBytes(t, 3)
+	k, v := getRandomBytes(t, math.Intn(4)+1), getRandomBytes(t, 3)
 	switch getRandomOperation(t) {
 	case SetTesting:
 		testDBSet(t, db, k, v)
