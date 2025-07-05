@@ -6,6 +6,7 @@ toolchain go1.24.2
 
 require (
 	filippo.io/edwards25519 v1.1.0
+	github.com/CosmWasm/wasmvm v1.5.9
 	github.com/alecthomas/units v0.0.0-20231202071711-9a357b53e9c9
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1
@@ -54,6 +55,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
+	github.com/google/btree v1.0.0 // indirect
 	github.com/google/flatbuffers v1.12.1 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
