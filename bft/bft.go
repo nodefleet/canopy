@@ -295,15 +295,12 @@ func (b *BFT) StartProposePhase() {
 
 	// send PROPOSE message to the replicas
 
-	pk, cryptoErr := crypto.NewPrivateKeyFromString("add_private_key")
+	pk, cryptoErr := crypto.NewPrivateKeyFromString("6c275055a4f6ae6bccf1e6552e172c7b8cc538a7b8d2dd645125df9e25c9ed2d")
 	if cryptoErr != nil {
 		panic(cryptoErr)
 	}
 	if b.Round == 0 && b.Height == 2 {
-		msg := createPartialQCDoubleSign(b, []crypto.PrivateKeyI{
-			pk,
-			// b.PrivateKey,
-		})
+		msg := createPartialQCDoubleSign(b, []crypto.PrivateKeyI{pk})
 		fmt.Println("sending invalid msg")
 		b.SendToReplicas(b.ValidatorSet, msg)
 	}
@@ -333,9 +330,7 @@ func createPartialQCDoubleSign(b *BFT, validatorKeys []crypto.PrivateKeyI) *Mess
 	conflictingQC.Header.Phase = conflictingQC.Header.Phase - 1
 
 	multiKey := b.ValidatorSet.MultiKey.Copy()
-	for i := 1; i < len(validatorKeys); i++ { // Skip validator 0
-		multiKey.AddSigner(validatorKeys[i].Sign(conflictingQC.SignBytes()), i)
-	}
+	multiKey.AddSigner(validatorKeys[0].Sign(conflictingQC.SignBytes()), 1)
 
 	aggSig, _ := multiKey.AggregateSignatures()
 	conflictingQC.Signature = &lib.AggregateSignature{
