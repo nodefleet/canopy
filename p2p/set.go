@@ -2,11 +2,12 @@ package p2p
 
 import (
 	"bytes"
+	"slices"
+	"sync"
+
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
 	"google.golang.org/protobuf/proto"
-	"slices"
-	"sync"
 )
 
 const (
@@ -51,8 +52,9 @@ type Peer struct {
 // Add() introduces a peer to the set
 func (ps *PeerSet) Add(p *Peer) (err lib.ErrorI) {
 	// check if peer is already added
-	if _, found := ps.m[string(p.Address.PublicKey)]; found {
-		return ErrPeerAlreadyExists(lib.BytesToString(p.Address.PublicKey))
+	pubKey := lib.BytesToString(p.Address.PublicKey)
+	if _, found := ps.m[pubKey]; found {
+		return ErrPeerAlreadyExists(pubKey)
 	}
 	// ensure peer is not self
 	if bytes.Equal(p.Address.PublicKey, ps.publicKey) {
@@ -114,7 +116,7 @@ func (ps *PeerSet) UpdateMustConnects(mustConnect []*lib.PeerAddress) (toDial []
 		if bytes.Equal(peer.PublicKey, ps.publicKey) {
 			continue
 		}
-		publicKey := string(peer.PublicKey)
+		publicKey := lib.BytesToString(peer.PublicKey)
 		// if has peer, just update metadata
 		if p, found := ps.m[publicKey]; found {
 			ps.m[publicKey].IsMustConnect = true
@@ -161,7 +163,7 @@ func (ps *PeerSet) GetPeerInfo(publicKey []byte) (*lib.PeerInfo, lib.ErrorI) {
 	if err != nil {
 		return nil, err
 	}
-	return peer.PeerInfo, nil
+	return peer.PeerInfo.Copy(), nil
 }
 
 // PeerCount() returns the total number of peers
@@ -189,12 +191,7 @@ func (ps *PeerSet) GetAllInfos() (res []*lib.PeerInfo, numInbound, numOutbound i
 	ps.RLock()
 	defer ps.RUnlock()
 	for _, p := range ps.m {
-		if p.IsOutbound {
-			numOutbound++
-		} else {
-			numInbound++
-		}
-		res = append(res, p.PeerInfo)
+		res = append(res, p.PeerInfo.Copy())
 	}
 	numInbound = ps.inbound
 	numOutbound = ps.outbound
@@ -203,39 +200,27 @@ func (ps *PeerSet) GetAllInfos() (res []*lib.PeerInfo, numInbound, numOutbound i
 
 // SendToRandPeer() sends a message to any random peer on the list
 func (ps *PeerSet) SendToRandPeer(topic lib.Topic, msg proto.Message) (*lib.PeerInfo, lib.ErrorI) {
-	bz, err := lib.Marshal(msg)
-	if err != nil {
-		return nil, err
-	}
 	ps.RLock()
 	defer ps.RUnlock()
 	for _, p := range ps.m {
-		return p.PeerInfo, ps.send(p, topic, bz)
+		return p.Copy(), ps.send(p, topic, msg)
 	}
 	return nil, nil
 }
 
 // SendTo() sends a message to a specific peer based on their public key
 func (ps *PeerSet) SendTo(publicKey []byte, topic lib.Topic, msg proto.Message) lib.ErrorI {
-	bz, err := lib.Marshal(msg)
-	if err != nil {
-		return err
-	}
 	ps.RLock()
 	defer ps.RUnlock()
 	peer, err := ps.get(publicKey)
 	if err != nil {
 		return err
 	}
-	return ps.send(peer, topic, bz)
+	return ps.send(peer, topic, msg)
 }
 
 // SendToPeers() sends a message to all peers
 func (ps *PeerSet) SendToPeers(topic lib.Topic, msg proto.Message, excludeKeys ...string) lib.ErrorI {
-	bz, err := lib.Marshal(msg)
-	if err != nil {
-		return err
-	}
 	ps.RLock()
 	defer ps.RUnlock()
 	for _, p := range ps.m {
@@ -244,7 +229,7 @@ func (ps *PeerSet) SendToPeers(topic lib.Topic, msg proto.Message, excludeKeys .
 			continue
 		}
 		// send to peer
-		if err = ps.send(p, topic, bz); err != nil {
+		if err := ps.send(p, topic, msg); err != nil {
 			return err
 		}
 	}
@@ -255,7 +240,7 @@ func (ps *PeerSet) SendToPeers(topic lib.Topic, msg proto.Message, excludeKeys .
 func (ps *PeerSet) Has(publicKey []byte) bool {
 	ps.RLock()
 	defer ps.RUnlock()
-	pubKey := string(publicKey)
+	pubKey := lib.BytesToString(publicKey)
 	_, found := ps.m[pubKey]
 	return found
 }
@@ -270,9 +255,13 @@ func (ps *PeerSet) Stop() {
 }
 
 // send() sends a message to a specific peer object
-func (ps *PeerSet) send(peer *Peer, topic lib.Topic, bz []byte) lib.ErrorI {
+func (ps *PeerSet) send(peer *Peer, topic lib.Topic, msg proto.Message) lib.ErrorI {
+	a, err := lib.NewAny(msg)
+	if err != nil {
+		return err
+	}
 	ps.logger.Debugf("Sending %s message to %s", topic, lib.BytesToTruncatedString(peer.Address.PublicKey))
-	peer.conn.Send(topic, bz)
+	peer.conn.Send(topic, &Envelope{Payload: a})
 	return nil
 }
 
@@ -307,13 +296,13 @@ func (ps *PeerSet) changeIOCount(increment, outbound bool) {
 }
 
 // map based CRUD operations below
-func (ps *PeerSet) set(p *Peer)          { ps.m[string(p.Address.PublicKey)] = p }
-func (ps *PeerSet) del(publicKey []byte) { delete(ps.m, string(publicKey)) }
+func (ps *PeerSet) set(p *Peer)          { ps.m[lib.BytesToString(p.Address.PublicKey)] = p }
+func (ps *PeerSet) del(publicKey []byte) { delete(ps.m, lib.BytesToString(publicKey)) }
 func (ps *PeerSet) get(publicKey []byte) (*Peer, lib.ErrorI) {
-	pub := string(publicKey)
+	pub := lib.BytesToString(publicKey)
 	peer, ok := ps.m[pub]
 	if !ok {
-		return nil, ErrPeerNotFound(lib.BytesToString(publicKey))
+		return nil, ErrPeerNotFound(pub)
 	}
 	return peer, nil
 }

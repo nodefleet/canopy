@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/canopy-network/canopy/lib/crypto"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/runtime/protoimpl"
 )
@@ -17,33 +18,22 @@ func TestMessageCacheAdd(t *testing.T) {
 		cache      MessageCache
 		toAdd      *MessageAndMetadata
 		expectedOk bool
-		expected   map[uint64]struct{}
+		expected   map[string]struct{}
 	}{
 		{
 			name:   "exists",
 			detail: "not added as message already exists in cache",
 			cache: MessageCache{
-				queue: list.New(),
-				deDupe: &DeDuplicator[uint64]{m: map[uint64]struct{}{
-					func() uint64 {
-						bz, _ := Marshal(&StringWrapper{Value: "b"})
-						return MemHash(bz)
-					}(): {},
+				deDupe: &DeDuplicator[string]{m: map[string]struct{}{
+					crypto.HashString([]byte("b")): {},
 				}},
 				maxSize: 2,
 			},
 			toAdd: &MessageAndMetadata{
-				Message: func() []byte {
-					bz, err := Marshal(&StringWrapper{Value: "b"})
-					require.NoError(t, err)
-					return bz
-				}(),
+				Hash: crypto.Hash([]byte("b")),
 			},
-			expected: map[uint64]struct{}{
-				func() uint64 {
-					bz, _ := Marshal(&StringWrapper{Value: "b"})
-					return MemHash(bz)
-				}(): {},
+			expected: map[string]struct{}{
+				crypto.HashString([]byte("b")): {},
 			},
 			expectedOk: false,
 		},
@@ -54,76 +44,45 @@ func TestMessageCacheAdd(t *testing.T) {
 				queue: func() (l *list.List) {
 					l = list.New()
 					l.PushFront(&MessageAndMetadata{
-						Message: func() []byte {
-							bz, err := Marshal(&StringWrapper{Value: "b"})
-							require.NoError(t, err)
-							return bz
-						}(),
+						Hash: crypto.Hash([]byte("b")),
 					})
 					return
 				}(),
-				deDupe: &DeDuplicator[uint64]{m: map[uint64]struct{}{
-					func() uint64 {
-						bz, _ := Marshal(&StringWrapper{Value: "b"})
-						return MemHash(bz)
-					}(): {},
+				deDupe: &DeDuplicator[string]{m: map[string]struct{}{
+					crypto.HashString([]byte("b")): {},
 				}},
 				maxSize: 2,
 			},
 			toAdd: &MessageAndMetadata{
-				Message: func() []byte {
-					bz, err := Marshal(&StringWrapper{Value: "c"})
-					require.NoError(t, err)
-					return bz
-				}(),
+				Hash: crypto.Hash([]byte("c")),
 			},
-			expected: map[uint64]struct{}{
-				func() uint64 {
-					bz, _ := Marshal(&StringWrapper{Value: "b"})
-					return MemHash(bz)
-				}(): {},
-				func() uint64 {
-					bz, _ := Marshal(&StringWrapper{Value: "c"})
-					return MemHash(bz)
-				}(): {},
+			expected: map[string]struct{}{
+				crypto.HashString([]byte("b")): {},
+				crypto.HashString([]byte("c")): {},
 			},
 			expectedOk: true,
 		},
 		{
 			name:   "max size",
-			detail: "added and evicted the old",
+			detail: "added as and evicted the old",
 			cache: MessageCache{
 				queue: func() (l *list.List) {
 					l = list.New()
 					l.PushFront(&MessageAndMetadata{
-						Message: func() []byte {
-							bz, err := Marshal(&StringWrapper{Value: "b"})
-							require.NoError(t, err)
-							return bz
-						}(),
+						Hash: crypto.Hash([]byte("b")),
 					})
 					return
 				}(),
-				deDupe: &DeDuplicator[uint64]{m: map[uint64]struct{}{
-					func() uint64 {
-						bz, _ := Marshal(&StringWrapper{Value: "b"})
-						return MemHash(bz)
-					}(): {},
+				deDupe: &DeDuplicator[string]{m: map[string]struct{}{
+					crypto.HashString([]byte("b")): {},
 				}},
 				maxSize: 1,
 			},
 			toAdd: &MessageAndMetadata{
-				Message: func() []byte {
-					bz, err := Marshal(&StringWrapper{Value: "c"})
-					require.NoError(t, err)
-					return bz
-				}(),
+				Hash: crypto.Hash([]byte("c")),
 			},
-			expected: map[uint64]struct{}{
-				func() uint64 {
-					bz, _ := Marshal(&StringWrapper{Value: "c"})
-					return MemHash(bz)
-				}(): {},
+			expected: map[string]struct{}{
+				crypto.HashString([]byte("c")): {},
 			},
 			expectedOk: true,
 		},
