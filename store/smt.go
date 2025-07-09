@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"math/bits"
+	"slices"
 	"sort"
 	"sync"
 
@@ -191,7 +192,7 @@ func (s *SMT) set() lib.ErrorI {
 	if !s.target.Key.equals(s.gcp) {
 		// create a new node (new parent of current and target)
 		newParent := newNode()
-		newParent.Key = s.gcp
+		newParent.Key = s.gcp.copy()
 		// get the parent (soon to be grandparent) of current
 		oldParent := s.traversed.Parent()
 		// calculate current's bytes by encoding
@@ -1103,8 +1104,26 @@ func (x *node) replaceChild(oldKey, newKey []byte) {
 	panic("no child node was replaced")
 }
 
-// copy() returns a shallow copy of the node
-func (x *node) copy() *node { return &(*x) }
+// copy() returns a deep copy of the node
+func (x *node) copy() *node {
+	return &node{
+		Key: x.Key.copy(),
+		Node: lib.Node{
+			Value:         slices.Clone(x.Value),
+			LeftChildKey:  slices.Clone(x.LeftChildKey),
+			RightChildKey: slices.Clone(x.RightChildKey),
+		},
+	}
+}
+
+// copy() returns a deep copy of the key
+func (k *key) copy() *key {
+	return &key{
+		key:      bytes.Clone(k.key),
+		bitCount: k.bitCount,
+		length:   k.length,
+	}
+}
 
 // NODE LIST CODE BELOW
 
