@@ -6,8 +6,9 @@ toolchain go1.24.2
 
 require (
 	filippo.io/edwards25519 v1.1.0
-	github.com/CosmWasm/wasmvm v1.5.9
+	github.com/CosmWasm/wasmvm/v2 v2.2.4
 	github.com/alecthomas/units v0.0.0-20231202071711-9a357b53e9c9
+	github.com/btcsuite/btcutil v1.0.2
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1
 	github.com/dgraph-io/badger/v4 v4.2.0
@@ -70,6 +71,7 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
+	github.com/shamaton/msgpack/v2 v2.2.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/supranational/blst v0.3.14 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect

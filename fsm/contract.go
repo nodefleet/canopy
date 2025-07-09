@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
 	"github.com/canopy-network/canopy/fsm/vm"
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
@@ -26,7 +26,7 @@ func (s *StateMachine) createContractEnv(contractAddr []byte) wasmvmtypes.Env {
 	return wasmvmtypes.Env{
 		Block: wasmvmtypes.BlockInfo{
 			Height:  s.height,
-			Time:    uint64(time.Now().UnixNano()),
+			Time:    wasmvmtypes.Uint64(uint64(time.Now().UnixNano())),
 			ChainID: "canopy-1", // TODO: get from config
 		},
 		Contract: wasmvmtypes.ContractInfo{

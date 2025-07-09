@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
 	"github.com/canopy-network/canopy/lib/crypto"
 )
 

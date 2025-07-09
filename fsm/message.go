@@ -717,7 +717,7 @@ func (s *StateMachine) HandleMessageInstantiateContract(msg *MessageInstantiateC
 	// Contract instantiated successfully
 
 	// Process response messages if any
-	if response != nil && len(response.Messages) > 0 {
+	if response != nil && len(response.SubMessages()) > 0 {
 		// TODO: Handle sub-messages
 	}
 
@@ -782,7 +782,7 @@ func (s *StateMachine) HandleMessageExecuteContract(msg *MessageExecuteContract)
 	// Contract executed successfully
 
 	// Process response messages if any
-	if response != nil && len(response.Messages) > 0 {
+	if response != nil && len(response.Ok.Messages) > 0 {
 		// TODO: Handle sub-messages
 	}
 

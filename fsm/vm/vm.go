@@ -7,8 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	wasmvm "github.com/CosmWasm/wasmvm"
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
+	wasmvm "github.com/CosmWasm/wasmvm/v2"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
 	"github.com/canopy-network/canopy/lib"
 )
 
@@ -72,6 +72,14 @@ func DefaultConfig() Config {
 		SupportedFeatures: []string{
 			"iterator",
 			"staking",
+			"ibc2",
+			"cosmwasm_1_1",
+			"cosmwasm_1_2",
+			"cosmwasm_1_3",
+			"cosmwasm_1_4",
+			"cosmwasm_2_0",
+			"cosmwasm_2_1",
+			"cosmwasm_2_2",
 			"stargate",
 		},
 		MemoryLimit: 32,  // 32 MiB memory limit
@@ -93,12 +101,9 @@ func NewVM(config Config, logger lib.LoggerI) (*VM, lib.ErrorI) {
 	}
 
 	// Create supported capabilities string
-	capabilities := ""
+	var capabilities []string
 	if len(config.SupportedFeatures) > 0 {
-		capabilities = config.SupportedFeatures[0]
-		for _, feature := range config.SupportedFeatures[1:] {
-			capabilities += "," + feature
-		}
+		capabilities = config.SupportedFeatures
 	}
 
 	// Create the VM instance
@@ -146,11 +151,10 @@ func (vm *VM) StoreCode(wasmCode []byte) (uint64, lib.ErrorI) {
 	if vm.vm == nil {
 		return 0, ErrVMClosed()
 	}
-
 	// Compile the WASM code
-	checksum, err := vm.vm.StoreCode(wasmCode)
+	checksum, gasCost, err := vm.vm.StoreCode(wasmvm.WasmCode(wasmCode), 800000000000)
 	if err != nil {
-		return 0, ErrStoreCode(err)
+		return 0, ErrStoreCode(err, gasCost)
 	}
 
 	// Generate a code ID from the checksum
@@ -161,7 +165,7 @@ func (vm *VM) StoreCode(wasmCode []byte) (uint64, lib.ErrorI) {
 		vm.logger.Warnf("Failed to cache WASM code: %v", err)
 	}
 
-	vm.logger.Debugf("Stored WASM code with ID: %d", codeID)
+	vm.logger.Debugf("Stored WASM code with ID: %d, cost: %d", codeID, gasCost)
 	return codeID, nil
 }
 
@@ -198,21 +202,20 @@ func (vm *VM) InstantiateContract(
 	goapi wasmvmtypes.GoAPI,
 	querier wasmvmtypes.Querier,
 	gasLimit uint64,
-) (*wasmvmtypes.Response, uint64, lib.ErrorI) {
+) (*wasmvmtypes.ContractResult, uint64, lib.ErrorI) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-
+	// nil vm check
 	if vm.vm == nil {
 		return nil, 0, ErrVMClosed()
 	}
-
 	// Convert code ID to checksum
 	checksum := vm.codeIDToChecksum(codeID)
-
-	// Execute instantiation
+	// create a new gas meter
 	gasMeter := NewSimpleGasMeter(gasLimit)
+	// Execute instantiation
 	res, gasUsed, err := vm.vm.Instantiate(
-		checksum,
+		wasmvmtypes.Checksum(checksum),
 		env,
 		info,
 		msg,
@@ -240,7 +243,7 @@ func (vm *VM) ExecuteContract(
 	goapi wasmvmtypes.GoAPI,
 	querier wasmvmtypes.Querier,
 	gasLimit uint64,
-) (*wasmvmtypes.Response, uint64, lib.ErrorI) {
+) (*wasmvmtypes.ContractResult, uint64, lib.ErrorI) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 
@@ -254,7 +257,7 @@ func (vm *VM) ExecuteContract(
 	// Execute the contract call
 	gasMeter := NewSimpleGasMeter(gasLimit)
 	res, gasUsed, err := vm.vm.Execute(
-		checksum,
+		wasmvmtypes.Checksum(checksum),
 		env,
 		info,
 		msg,
@@ -281,7 +284,7 @@ func (vm *VM) QueryContract(
 	goapi wasmvmtypes.GoAPI,
 	querier wasmvmtypes.Querier,
 	gasLimit uint64,
-) ([]byte, uint64, lib.ErrorI) {
+) (*wasmvmtypes.QueryResult, uint64, lib.ErrorI) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 
@@ -295,7 +298,7 @@ func (vm *VM) QueryContract(
 	// Execute the query
 	gasMeter := NewSimpleGasMeter(gasLimit)
 	res, gasUsed, err := vm.vm.Query(
-		checksum,
+		wasmvmtypes.Checksum(checksum),
 		env,
 		msg,
 		store,
@@ -329,16 +332,9 @@ func (vm *VM) ValidateContract(wasmCode []byte) lib.ErrorI {
 	defer os.RemoveAll(tempDir)
 
 	// Create a temporary VM for validation
-	capabilities := ""
-	if len(vm.supportedFeatures) > 0 {
-		capabilities = vm.supportedFeatures[0]
-		for _, feature := range vm.supportedFeatures[1:] {
-			capabilities += "," + feature
-		}
-	}
 	tempVM, err := wasmvm.NewVM(
 		tempDir,
-		capabilities,
+		vm.supportedFeatures,
 		vm.memoryLimit,
 		false,
 		10000,
@@ -349,7 +345,7 @@ func (vm *VM) ValidateContract(wasmCode []byte) lib.ErrorI {
 	defer tempVM.Cleanup()
 
 	// Try to compile the code
-	_, err = tempVM.StoreCode(wasmCode)
+	_, _, err = tempVM.StoreCode(wasmvm.WasmCode(wasmCode), 10000000)
 	if err != nil {
 		return ErrValidateContract(err)
 	}

@@ -3,7 +3,8 @@ package vm
 import (
 	"fmt"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	"github.com/btcsuite/btcutil/bech32"
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
 )
@@ -270,9 +271,41 @@ func (ei *ErrorIterator) Error() error             { return ei.err }
 // NewCanopyGoAPI creates a new GoAPI implementation for Canopy
 func (sb *StateBridge) NewCanopyGoAPI() wasmvmtypes.GoAPI {
 	return wasmvmtypes.GoAPI{
-		HumanAddress:     sb.humanizeAddress,
-		CanonicalAddress: sb.canonicalizeAddress,
+		HumanizeAddress:     sb.humanizeAddress,
+		CanonicalizeAddress: sb.canonicalizeAddress,
+		ValidateAddress:     sb.validateAddress,
 	}
+}
+
+// validateAddress validates an address format
+func (sb *StateBridge) validateAddress(addr string) (uint64, error) {
+	if len(addr) == 0 {
+		return 0, fmt.Errorf("address cannot be empty")
+	}
+
+	// Check if address has valid bech32 format
+	hrp, decoded, err := bech32.Decode(addr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid bech32 address: %w", err)
+	}
+
+	// Validate human-readable part (HRP) if needed
+	if hrp == "" {
+		return 0, fmt.Errorf("invalid address: empty human-readable part")
+	}
+
+	// Convert 5-bit groups to 8-bit bytes
+	converted, err := bech32.ConvertBits(decoded, 5, 8, false)
+	if err != nil {
+		return 0, fmt.Errorf("invalid address: failed to convert bits: %w", err)
+	}
+
+	// Validate decoded data length (common validation)
+	if len(converted) == 0 {
+		return 0, fmt.Errorf("invalid address: empty decoded data")
+	}
+
+	return 0, nil
 }
 
 // canonicalizeAddress converts a human-readable address to canonical form

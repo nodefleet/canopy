@@ -66,8 +66,8 @@ func ErrCreateVM(err error) lib.ErrorI {
 	return lib.NewError(CodeCreateVM, VMModule, "failed to create wasmvm instance: "+err.Error())
 }
 
-func ErrStoreCode(err error) lib.ErrorI {
-	return lib.NewError(CodeStoreCode, VMModule, "failed to compile WASM code: "+err.Error())
+func ErrStoreCode(err error, gasCost uint64) lib.ErrorI {
+	return lib.NewError(CodeStoreCode, VMModule, "failed to compile WASM code: "+err.Error()+", gas cost: "+fmt.Sprintf("%d", gasCost))
 }
 
 func ErrGetCode(codeID uint64) lib.ErrorI {
