@@ -542,7 +542,7 @@ func (s *SMT) addSyntheticBorders() (cleanup func() lib.ErrorI, err lib.ErrorI) 
 func (s *SMT) sortOperationsByPrefix(unsortedOps map[uint64]valueOp) (groups [8][]*node, err lib.ErrorI) {
 	for _, operation := range unsortedOps {
 		value, del := []byte(nil), true
-		if operation.op != opDelete {
+		if operation.op != opDelete && !entryIsDelete(operation.entry) {
 			value, del = crypto.Hash(operation.value), false
 		}
 		n := &node{Key: newNodeKey(crypto.Hash(operation.key), s.keyBitLength), Node: lib.Node{Value: value}, delete: del}
