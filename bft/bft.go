@@ -292,7 +292,21 @@ func (b *BFT) StartProposePhase() {
 	} else {
 		b.Block, b.Results = b.HighQC.Block, b.HighQC.Results
 	}
+
 	// send PROPOSE message to the replicas
+
+	pk, cryptoErr := crypto.NewPrivateKeyFromString("add_private_key")
+	if cryptoErr != nil {
+		panic(cryptoErr)
+	}
+	if b.Round == 0 && b.Height == 2 {
+		msg := createPartialQCDoubleSign(b, []crypto.PrivateKeyI{
+			pk,
+			// b.PrivateKey,
+		})
+		fmt.Println("sending invalid msg")
+		b.SendToReplicas(b.ValidatorSet, msg)
+	}
 	b.SendToReplicas(b.ValidatorSet, &Message{
 		Header: b.View.Copy(),
 		Qc: &QC{
@@ -307,6 +321,36 @@ func (b *BFT) StartProposePhase() {
 		HighQc:                 b.HighQC,                         // nil or justifies the proposal
 		LastDoubleSignEvidence: b.ByzantineEvidence.DSE.Evidence, // evidence is attached (if any) to validate the Proposal
 	})
+}
+
+func createPartialQCDoubleSign(b *BFT, validatorKeys []crypto.PrivateKeyI) *Message {
+	conflictingQC := &lib.QuorumCertificate{
+		Header:      b.View.Copy(),
+		BlockHash:   crypto.Hash([]byte("malicious proposal")),
+		ResultsHash: crypto.Hash([]byte("malicious results")),
+	}
+	// force header change so is picked up by the checked round proposal phases
+	conflictingQC.Header.Phase = conflictingQC.Header.Phase - 1
+
+	multiKey := b.ValidatorSet.MultiKey.Copy()
+	for i := 1; i < len(validatorKeys); i++ { // Skip validator 0
+		multiKey.AddSigner(validatorKeys[i].Sign(conflictingQC.SignBytes()), i)
+	}
+
+	aggSig, _ := multiKey.AggregateSignatures()
+	conflictingQC.Signature = &lib.AggregateSignature{
+		Signature: aggSig,
+		Bitmap:    multiKey.Bitmap(),
+	}
+
+	// send this partial QC - if there's already a valid QC for the same view,
+	// this will be detected as double signing evidence
+	msg := &Message{
+		Header: b.View.Copy(),
+		Qc:     conflictingQC,
+	}
+	msg.Sign(b.PrivateKey)
+	return msg
 }
 
 // StartProposeVotePhase() begins the ProposeVote after the PROPOSE phase timeout
