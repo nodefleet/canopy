@@ -146,7 +146,7 @@ func NewSMT(rootKey []byte, keyBitLen int, store lib.RWStoreI) (smt *SMT) {
 	smt = &SMT{
 		store:        store,
 		keyBitLength: keyBitLen,
-		nodeCache:    make(map[string]*node, MaxCacheSize),
+		nodeCache:    make(map[string]*node),
 		minKey:       newNodeKey(bytes.Repeat([]byte{0}, 20), keyBitLen),
 		maxKey:       newNodeKey(bytes.Repeat([]byte{255}, 20), keyBitLen),
 	}

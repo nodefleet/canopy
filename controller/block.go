@@ -84,10 +84,13 @@ func (c *Controller) ListenForBlock() {
 				// exit iteration
 				return
 			}
-			// gossip the block to our peers
-			c.GossipBlock(qc, sender, blockMessage.Time)
-			// signal a reset to the bft module
-			c.Consensus.ResetBFT <- bft.ResetBFT{StartTime: time.UnixMicro(int64(blockMessage.Time))}
+			// if not syncing - gossip the block
+			if !c.Syncing().Load() {
+				// gossip the block to our peers
+				c.GossipBlock(qc, sender, blockMessage.Time)
+				// signal a reset to the bft module
+				c.Consensus.ResetBFT <- bft.ResetBFT{StartTime: time.UnixMicro(int64(blockMessage.Time))}
+			}
 			// reset 'newBlockPeers' because a new block was received properly
 			newBlockPeers = make(map[string]struct{})
 		}()
