@@ -530,24 +530,21 @@ func (s *StateMachine) GetFeeForMessageName(name string) (fee uint64, err lib.Er
 // calculateGasLimitFromFee() calculates the gas limit based on the transaction fee
 // Uses a conversion rate where higher fees allow for more gas consumption
 func (s *StateMachine) calculateGasLimitFromFee(fee uint64, minGasLimit uint64) uint64 {
-	// Base conversion: 1 CNPY unit = 100 gas units
-	// This means 10,000 uCNPY (minimum fee) = 1,000,000 gas
+	// base conversion: 1 CNPY unit = 100 gas units
+	// this means 10,000 uCNPY (minimum fee) = 1,000,000 gas
 	const gasPerFeeUnit = 100
-
-	// Calculate gas limit from fee
+	// calculate gas limit from fee
 	calculatedGas := fee * gasPerFeeUnit
-
-	// Ensure minimum gas limit
+	// ensure minimum gas limit
 	if calculatedGas < minGasLimit {
 		return minGasLimit
 	}
-
-	// Protocol maximum gas limit per transaction (prevents resource abuse)
-	const maxGasPerTransaction = 50000000 // 50M gas max
+	// protocol maximum gas limit per transaction (prevents resource abuse)
+	const maxGasPerTransaction = 50_000_000 // 50M gas max
 	if calculatedGas > maxGasPerTransaction {
 		return maxGasPerTransaction
 	}
-
+	// return gas limit
 	return calculatedGas
 }
 
@@ -632,65 +629,63 @@ func (s *StateMachine) GetAuthorizedSignersFor(msg lib.MessageI) (signers [][]by
 
 // HandleMessageStoreCode stores WASM bytecode and returns a code ID
 func (s *StateMachine) HandleMessageStoreCode(msg *MessageStoreCode) lib.ErrorI {
-	// Validate the message
+	// validate the message
 	if err := msg.Check(); err != nil {
 		return err
 	}
-	// Store the WASM code
+	// store the WASM code
 	codeID, err := s.vm.StoreCode(msg.WasmByteCode)
 	if err != nil {
 		return err
 	}
-	// Store code in state
+	// store code in state
 	if err := s.storeCode(codeID, msg.Sender, msg.WasmByteCode); err != nil {
 		return err
 	}
 	s.log.Infof("Stored contract %x successfully", codeID)
-	// Code stored successfully
+	// code stored successfully
 	return nil
 }
 
 // HandleMessageInstantiateContract creates a new contract instance
 func (s *StateMachine) HandleMessageInstantiateContract(msg *MessageInstantiateContract) lib.ErrorI {
-	// Validate the message
+	// validate the message
 	if err := msg.Check(); err != nil {
 		return err
 	}
-	// Verify code exists
+	// verify code exists
 	if !s.vm.HasCode(msg.CodeId) {
 		return ErrCodeIdNotFound()
 	}
-
-	// Generate new contract address
+	// generate new contract address
 	contractAddr := s.generateContractAddress(msg.Sender, msg.CodeId)
-
-	// Create execution environment
+	// create execution environment
 	env := s.createContractEnv(contractAddr)
+	// create message info for contract execution
 	info := s.createMessageInfo(msg.Sender, msg.GetFunds())
-
-	// Calculate gas limit based on message fee
+	// calculate gas limit based on message fee
 	minFee, err := s.GetFeeForMessageName(msg.Name())
 	if err != nil {
 		return err
 	}
 	gasLimit := s.calculateGasLimitFromFee(minFee, 500000) // Minimum 500k gas for instantiation
-
-	// Get gas costs from parameters
+	// get gas costs from parameters
 	gasCosts, err := s.getGasCostsFromParams()
 	if err != nil {
 		return err
 	}
-
-	// Create state bridge and KV store
+	// create state bridge
 	bridge := vm.NewStateBridge(s.store, s.height, 1, gasLimit, gasCosts)
+	// create the kv store
 	kvStore := bridge.NewContractKVStore(contractAddr)
+	// create the go api type
 	goAPI := bridge.NewCanopyGoAPI()
 	querier := bridge.NewCanopyQuerier()
-
 	// need this to prevent out of gas errors
 	gasLimit = 1000000000000
-
-	// Instantiate the contract
+	// temp fix
+	// msg.Msg = []byte("{}")
+	// instantiate the contract
 	response, gasUsed, err := s.vm.InstantiateContract(
 		msg.CodeId,
 		env,
@@ -704,63 +699,53 @@ func (s *StateMachine) HandleMessageInstantiateContract(msg *MessageInstantiateC
 	if err != nil {
 		return err
 	}
-
-	// Log gas consumption for monitoring and calculate efficiency
+	// log gas consumption for monitoring and calculate efficiency
 	gasEfficiency := float64(gasUsed) / float64(gasLimit) * 100
 	s.log.Debugf("Contract instantiation consumed %d gas out of %d limit (%.1f%% efficiency)", gasUsed, gasLimit, gasEfficiency)
-
-	// Store contract metadata
+	s.log.Infof("Contract address:", lib.BytesToString(contractAddr))
+	// store contract metadata
 	if err := s.storeContractMetadata(contractAddr, msg.CodeId, msg.Admin, msg.Label); err != nil {
 		return err
 	}
-
-	// Contract instantiated successfully
-
-	// Process response messages if any
+	// contract instantiated successfully
+	// process response messages if any
 	if response != nil && len(response.SubMessages()) > 0 {
 		// TODO: Handle sub-messages
 	}
-
 	return nil
 }
 
 // HandleMessageExecuteContract executes a message on an existing contract
 func (s *StateMachine) HandleMessageExecuteContract(msg *MessageExecuteContract) lib.ErrorI {
-	// Validate the message
+	// validate the message
 	if err := msg.Check(); err != nil {
 		return err
 	}
-
-	// Get contract metadata
+	// get contract metadata
 	metadata, err := s.getContractMetadata(msg.Contract)
 	if err != nil {
 		return err
 	}
-
-	// Create execution environment
+	// create execution environment
 	env := s.createContractEnv(msg.Contract)
 	info := s.createMessageInfo(msg.Sender, msg.GetFunds())
-
-	// Calculate gas limit based on message fee
+	// calculate gas limit based on message fee
 	minFee, err := s.GetFeeForMessageName(msg.Name())
 	if err != nil {
 		return err
 	}
 	gasLimit := s.calculateGasLimitFromFee(minFee, 200000) // Minimum 200k gas for execution
-
-	// Get gas costs from parameters
+	// get gas costs from parameters
 	gasCosts, err := s.getGasCostsFromParams()
 	if err != nil {
 		return err
 	}
-
-	// Create state bridge and KV store
+	// create state bridge and KV store
 	bridge := vm.NewStateBridge(s.store, s.height, 1, gasLimit, gasCosts)
 	kvStore := bridge.NewContractKVStore(msg.Contract)
 	goAPI := bridge.NewCanopyGoAPI()
 	querier := bridge.NewCanopyQuerier()
-
-	// Execute the contract
+	// execute the contract
 	response, gasUsed, err := s.vm.ExecuteContract(
 		metadata.CodeId,
 		env,
@@ -775,13 +760,11 @@ func (s *StateMachine) HandleMessageExecuteContract(msg *MessageExecuteContract)
 		return err
 	}
 
-	// Log gas consumption for monitoring and calculate efficiency
+	// log gas consumption for monitoring and calculate efficiency
 	gasEfficiency := float64(gasUsed) / float64(gasLimit) * 100
 	s.log.Debugf("Contract execution consumed %d gas out of %d limit (%.1f%% efficiency)", gasUsed, gasLimit, gasEfficiency)
-
-	// Contract executed successfully
-
-	// Process response messages if any
+	// contract executed successfully
+	// process response messages if any
 	if response != nil && len(response.Ok.Messages) > 0 {
 		// TODO: Handle sub-messages
 	}
@@ -791,68 +774,59 @@ func (s *StateMachine) HandleMessageExecuteContract(msg *MessageExecuteContract)
 
 // HandleMessageMigrateContract migrates a contract to new code
 func (s *StateMachine) HandleMessageMigrateContract(msg *MessageMigrateContract) lib.ErrorI {
-	// Validate the message
+	// validate the message
 	if err := msg.Check(); err != nil {
 		return err
 	}
-
-	// TODO: Implement contract migration
+	// TODO: implement contract migration
 	// This involves updating the contract's code ID and calling the migrate function
 	return ErrNotImplemented("Contract migration not yet implemented")
 }
 
 // HandleMessageUpdateAdmin updates the admin of a contract
 func (s *StateMachine) HandleMessageUpdateAdmin(msg *MessageUpdateAdmin) lib.ErrorI {
-	// Validate the message
+	// validate the message
 	if err := msg.Check(); err != nil {
 		return err
 	}
-
-	// Get contract metadata
+	// get contract metadata
 	metadata, err := s.getContractMetadata(msg.Contract)
 	if err != nil {
 		return err
 	}
-
-	// Check sender is current admin
+	// check sender is current admin
 	if !bytes.Equal(metadata.Admin, msg.Sender) {
 		return ErrUnauthorized("Only current admin can update admin")
 	}
-
-	// Update admin
+	// update admin
 	metadata.Admin = msg.NewAdmin
 	if err := s.setContractMetadata(msg.Contract, metadata); err != nil {
 		return err
 	}
-
-	// Admin updated successfully
+	// admin updated successfully
 	return nil
 }
 
 // HandleMessageClearAdmin clears the admin of a contract
 func (s *StateMachine) HandleMessageClearAdmin(msg *MessageClearAdmin) lib.ErrorI {
-	// Validate the message
+	// validate the message
 	if err := msg.Check(); err != nil {
 		return err
 	}
-
-	// Get contract metadata
+	// get contract metadata
 	metadata, err := s.getContractMetadata(msg.Contract)
 	if err != nil {
 		return err
 	}
-
-	// Check sender is current admin
+	// check sender is current admin
 	if !bytes.Equal(metadata.Admin, msg.Sender) {
 		return ErrUnauthorized("Only current admin can clear admin")
 	}
-
-	// Clear admin
+	// clear admin
 	metadata.Admin = nil
 	if err := s.setContractMetadata(msg.Contract, metadata); err != nil {
 		return err
 	}
-
-	// Admin cleared successfully
+	// admin cleared successfully
 	return nil
 }

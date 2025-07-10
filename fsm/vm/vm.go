@@ -100,16 +100,10 @@ func NewVM(config Config, logger lib.LoggerI) (*VM, lib.ErrorI) {
 		return nil, ErrInitCache(err)
 	}
 
-	// Create supported capabilities string
-	var capabilities []string
-	if len(config.SupportedFeatures) > 0 {
-		capabilities = config.SupportedFeatures
-	}
-
 	// Create the VM instance
 	wasmVMInstance, e := wasmvm.NewVM(
 		config.DataDir,
-		capabilities,
+		config.SupportedFeatures,
 		config.MemoryLimit,
 		true,             // printDebug
 		config.CacheSize, // cache capacity
@@ -209,13 +203,13 @@ func (vm *VM) InstantiateContract(
 	if vm.vm == nil {
 		return nil, 0, ErrVMClosed()
 	}
-	// Convert code ID to checksum
+	// convert code ID to checksum
 	checksum := vm.codeIDToChecksum(codeID)
 	// create a new gas meter
 	gasMeter := NewSimpleGasMeter(gasLimit)
-	// Execute instantiation
+	// execute instantiation
 	res, gasUsed, err := vm.vm.Instantiate(
-		wasmvmtypes.Checksum(checksum),
+		checksum,
 		env,
 		info,
 		msg,
@@ -224,7 +218,7 @@ func (vm *VM) InstantiateContract(
 		querier,
 		gasMeter,
 		gasLimit,
-		wasmvmtypes.UFraction{},
+		wasmvmtypes.UFraction{Numerator: 1, Denominator: 10},
 	)
 	if err != nil {
 		return nil, gasUsed, ErrInstantiateContract(err)
@@ -246,18 +240,16 @@ func (vm *VM) ExecuteContract(
 ) (*wasmvmtypes.ContractResult, uint64, lib.ErrorI) {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-
+	// nil vm check
 	if vm.vm == nil {
 		return nil, 0, ErrVMClosed()
 	}
-
-	// Convert code ID to checksum
+	// convert code ID to checksum
 	checksum := vm.codeIDToChecksum(codeID)
-
-	// Execute the contract call
+	// execute the contract call
 	gasMeter := NewSimpleGasMeter(gasLimit)
 	res, gasUsed, err := vm.vm.Execute(
-		wasmvmtypes.Checksum(checksum),
+		checksum,
 		env,
 		info,
 		msg,
@@ -266,7 +258,7 @@ func (vm *VM) ExecuteContract(
 		querier,
 		gasMeter,
 		gasLimit,
-		wasmvmtypes.UFraction{},
+		wasmvmtypes.UFraction{Numerator: 1, Denominator: 10},
 	)
 	if err != nil {
 		return nil, gasUsed, ErrExecuteContract(err)
@@ -291,10 +283,8 @@ func (vm *VM) QueryContract(
 	if vm.vm == nil {
 		return nil, 0, ErrVMClosed()
 	}
-
 	// Convert code ID to checksum
 	checksum := vm.codeIDToChecksum(codeID)
-
 	// Execute the query
 	gasMeter := NewSimpleGasMeter(gasLimit)
 	res, gasUsed, err := vm.vm.Query(
@@ -306,7 +296,7 @@ func (vm *VM) QueryContract(
 		querier,
 		gasMeter,
 		gasLimit,
-		wasmvmtypes.UFraction{},
+		wasmvmtypes.UFraction{Numerator: 1, Denominator: 10},
 	)
 	if err != nil {
 		return nil, gasUsed, ErrQueryContract(err)
@@ -323,15 +313,13 @@ func (vm *VM) ValidateContract(wasmCode []byte) lib.ErrorI {
 	if vm.vm == nil {
 		return ErrVMClosed()
 	}
-
-	// Create a temporary directory for validation
+	// create a temporary directory for validation
 	tempDir := filepath.Join(vm.dataDir, "temp")
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return ErrCreateTempDir(err)
 	}
 	defer os.RemoveAll(tempDir)
-
-	// Create a temporary VM for validation
+	// create a temporary VM for validation
 	tempVM, err := wasmvm.NewVM(
 		tempDir,
 		vm.supportedFeatures,
@@ -343,7 +331,6 @@ func (vm *VM) ValidateContract(wasmCode []byte) lib.ErrorI {
 		return ErrCreateTempVM(err)
 	}
 	defer tempVM.Cleanup()
-
 	// Try to compile the code
 	_, _, err = tempVM.StoreCode(wasmvm.WasmCode(wasmCode), 10000000)
 	if err != nil {
@@ -378,7 +365,7 @@ func (vm *VM) checksumToCodeID(checksum wasmvmtypes.Checksum) uint64 {
 func (vm *VM) codeIDToChecksum(codeID uint64) wasmvmtypes.Checksum {
 	// Retrieve checksum from mapping
 	if checksum, exists := vm.idToChecksum[codeID]; exists {
-		fmt.Println(codeID, "->", checksum)
+		fmt.Println(codeID, "->", lib.BytesToString(checksum))
 		return checksum
 	}
 

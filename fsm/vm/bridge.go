@@ -192,7 +192,7 @@ func (kvs *ContractKVStore) Iterator(start, end []byte) wasmvmtypes.Iterator {
 
 // ReverseIterator creates a reverse iterator over the contract's key-value store
 func (kvs *ContractKVStore) ReverseIterator(start, end []byte) wasmvmtypes.Iterator {
-	fmt.Println("iterator", start, end)
+	fmt.Println("reviterator", start, end)
 	// For simplicity, use reverse prefix iteration with start key
 	startKey := append(kvs.prefix, start...)
 
@@ -269,11 +269,19 @@ func (ei *ErrorIterator) Domain() ([]byte, []byte) { return nil, nil }
 func (ei *ErrorIterator) Error() error             { return ei.err }
 
 // NewCanopyGoAPI creates a new GoAPI implementation for Canopy
+// A GoAPI implementation provides a bridge between WebAssembly (WASM) smart contracts
+// and the host blockchain environment. It exposes core blockchain functionality
+// that contracts need to interact with the underlying system.
 func (sb *StateBridge) NewCanopyGoAPI() wasmvmtypes.GoAPI {
+	// Return a GoAPI struct that implements the required interface methods
+	// for address handling operations that WASM contracts can call
 	return wasmvmtypes.GoAPI{
-		HumanizeAddress:     sb.humanizeAddress,
+		// HumanizeAddress converts internal address representation to human-readable format
+		HumanizeAddress: sb.humanizeAddress,
+		// CanonicalizeAddress converts human-readable address to internal canonical format
 		CanonicalizeAddress: sb.canonicalizeAddress,
-		ValidateAddress:     sb.validateAddress,
+		// ValidateAddress checks if an address string is valid according to blockchain rules
+		ValidateAddress: sb.validateAddress,
 	}
 }
 

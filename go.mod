@@ -4,9 +4,11 @@ go 1.23.0
 
 toolchain go1.24.2
 
+replace github.com/CosmWasm/wasmvm/v2 => ../wasmvm
+
 require (
 	filippo.io/edwards25519 v1.1.0
-	github.com/CosmWasm/wasmvm/v2 v2.2.4
+	github.com/CosmWasm/wasmvm/v2 v2.2.2
 	github.com/alecthomas/units v0.0.0-20231202071711-9a357b53e9c9
 	github.com/btcsuite/btcutil v1.0.2
 	github.com/cenkalti/backoff/v4 v4.3.0

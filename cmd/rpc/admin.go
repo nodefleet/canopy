@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"github.com/canopy-network/canopy/fsm"
 	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/canopy-network/canopy/fsm"
 
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
@@ -460,8 +461,7 @@ func (s *Server) TransactionInstantiateContract(w http.ResponseWriter, r *http.R
 		if ptr.Msg == "" {
 			return nil, fmt.Errorf("contract message is required")
 		}
-
-		// Parse admin address if provided
+		// parse admin address if provided
 		var adminBytes []byte
 		if ptr.Admin != "" {
 			admin, err := crypto.NewAddressFromString(ptr.Admin)
@@ -470,20 +470,17 @@ func (s *Server) TransactionInstantiateContract(w http.ResponseWriter, r *http.R
 			}
 			adminBytes = admin.Bytes()
 		}
-
-		// Parse funds if provided
+		// parse funds if provided
 		var funds []*fsm.Coin
 		if len(ptr.Funds) > 0 {
 			if err := lib.UnmarshalJSON(ptr.Funds, &funds); err != nil {
 				return nil, fmt.Errorf("invalid funds format: %w", err)
 			}
 		}
-
-		// Retrieve the fee required for this type of transaction
+		// retrieve the fee required for this type of transaction
 		if err := s.getFeeFromState(ptr, fsm.MessageInstantiateContractName); err != nil {
 			return nil, err
 		}
-
 		// Create and return the transaction to be sent
 		return fsm.NewInstantiateContractTransaction(p, ptr.CodeId, ptr.Label, []byte(ptr.Msg), adminBytes, funds, s.config.NetworkID, s.config.ChainId, ptr.Fee, s.controller.ChainHeight(), ptr.Memo)
 	})

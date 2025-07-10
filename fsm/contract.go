@@ -16,23 +16,32 @@ import (
 
 // generateContractAddress generates a new contract address
 func (s *StateMachine) generateContractAddress(sender []byte, codeID uint64) []byte {
-	// Simple address generation - in production use more sophisticated method
+	// simple address generation - in production use more sophisticated method
 	hash := crypto.Hash(append(sender, vm.EncodeUint64(codeID)...))
 	return hash[:crypto.AddressSize]
 }
 
 // createContractEnv creates the execution environment for a contract
 func (s *StateMachine) createContractEnv(contractAddr []byte) wasmvmtypes.Env {
+	// Return a new environment structure for contract execution
 	return wasmvmtypes.Env{
+		// Create block information section
 		Block: wasmvmtypes.BlockInfo{
-			Height:  s.height,
-			Time:    wasmvmtypes.Uint64(uint64(time.Now().UnixNano())),
+			// Set the current block height from state machine
+			Height: s.height,
+			// Set the current timestamp in nanoseconds since Unix epoch
+			Time: wasmvmtypes.Uint64(uint64(time.Now().UnixNano())),
+			// Set the chain identifier (hardcoded for now)
 			ChainID: "canopy-1", // TODO: get from config
 		},
+		// Create contract information section
 		Contract: wasmvmtypes.ContractInfo{
+			// Convert contract address bytes to string format
 			Address: crypto.NewAddressFromBytes(contractAddr).String(),
 		},
+		// Create transaction information section
 		Transaction: &wasmvmtypes.TransactionInfo{
+			// Set transaction index to 0 (placeholder value)
 			Index: 0, // TODO: get transaction index
 		},
 	}
@@ -48,7 +57,7 @@ func (s *StateMachine) createMessageInfo(sender []byte, funds []*Coin) wasmvmtyp
 			Amount: strconv.FormatUint(fund.Amount, 10),
 		})
 	}
-
+	// return message info
 	return wasmvmtypes.MessageInfo{
 		Sender: crypto.NewAddressFromBytes(sender).String(),
 		Funds:  wasmFunds,
