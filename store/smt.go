@@ -450,8 +450,8 @@ func (s *SMT) initializeTree(rootKey *key) {
 	s.root = &node{
 		Key: rootKey,
 		Node: lib.Node{
-			LeftChildKey:  minNode.Key.bytes(),
-			RightChildKey: maxNode.Key.bytes(),
+			LeftChildKey:  bytes.Clone(minNode.Key.bytes()),
+			RightChildKey: bytes.Clone(maxNode.Key.bytes()),
 		},
 	}
 	// update the root's value
@@ -1077,7 +1077,7 @@ func (x *node) bytes() ([]byte, lib.ErrorI) {
 
 // setChildren() sets the children of a node in its structure
 func (x *node) setChildren(leftKey, rightKey []byte) {
-	x.LeftChildKey, x.RightChildKey = leftKey, rightKey
+	x.LeftChildKey, x.RightChildKey = bytes.Clone(leftKey), bytes.Clone(rightKey)
 }
 
 // getOtherChild() returns the sibling for the child key passed and which child it is
@@ -1095,10 +1095,10 @@ func (x *node) getOtherChild(childKey []byte) ([]byte, byte) {
 func (x *node) replaceChild(oldKey, newKey []byte) {
 	switch {
 	case bytes.Equal(x.LeftChildKey, oldKey):
-		x.LeftChildKey = newKey
+		x.LeftChildKey = bytes.Clone(newKey)
 		return
 	case bytes.Equal(x.RightChildKey, oldKey):
-		x.RightChildKey = newKey
+		x.RightChildKey = bytes.Clone(newKey)
 		return
 	}
 	panic("no child node was replaced")
