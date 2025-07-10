@@ -73,7 +73,7 @@ func (gm *SimpleGasMeter) Limit() uint64 {
 
 // ConsumeGas consumes the given amount of gas
 func (gm *SimpleGasMeter) ConsumeGas(amount uint64, descriptor string) error {
-	fmt.Println("gas meteter", amount, descriptor, gm.limit)
+	fmt.Println("DEBUG: ConsumeGas() called", amount, descriptor, gm.limit)
 	gm.used += amount
 	if gm.used > gm.limit {
 		return ErrOutOfGas(gm.used, gm.limit)
@@ -130,7 +130,7 @@ func (sb *StateBridge) NewContractKVStore(contractAddr []byte) *ContractKVStore 
 
 // Get retrieves a value from the contract's key-value store
 func (kvs *ContractKVStore) Get(key []byte) []byte {
-	fmt.Println("get", key)
+	fmt.Println("kv get", key)
 	// Consume gas for storage read operation using configurable gas costs
 	if err := kvs.bridge.ConsumeGas(kvs.bridge.gasCosts.StorageRead); err != nil {
 		fmt.Println(err)
@@ -148,7 +148,7 @@ func (kvs *ContractKVStore) Get(key []byte) []byte {
 
 // Set stores a value in the contract's key-value store
 func (kvs *ContractKVStore) Set(key, value []byte) {
-	fmt.Println("set", key, value)
+	fmt.Println("kv set", key, string(value))
 	// Consume gas for storage write operation using configurable gas costs
 	if err := kvs.bridge.ConsumeGas(kvs.bridge.gasCosts.StorageWrite); err != nil {
 		fmt.Println(err)
@@ -161,7 +161,7 @@ func (kvs *ContractKVStore) Set(key, value []byte) {
 
 // Delete removes a key from the contract's key-value store
 func (kvs *ContractKVStore) Delete(key []byte) {
-	fmt.Println("delete", key)
+	fmt.Println("kv delete", key)
 	// Consume gas for storage delete operation using configurable gas costs
 	if err := kvs.bridge.ConsumeGas(kvs.bridge.gasCosts.StorageDelete); err != nil {
 		fmt.Println(err)

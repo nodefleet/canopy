@@ -332,7 +332,7 @@ func (vm *VM) ValidateContract(wasmCode []byte) lib.ErrorI {
 	}
 	defer tempVM.Cleanup()
 	// Try to compile the code
-	_, _, err = tempVM.StoreCode(wasmvm.WasmCode(wasmCode), 10000000)
+	_, _, err = tempVM.StoreCode(wasmvm.WasmCode(wasmCode), 800000000000)
 	if err != nil {
 		return ErrValidateContract(err)
 	}
@@ -356,7 +356,6 @@ func (vm *VM) checksumToCodeID(checksum wasmvmtypes.Checksum) uint64 {
 	vm.idToChecksum[newID] = make([]byte, len(checksum))
 	copy(vm.idToChecksum[newID], checksum)
 
-	fmt.Println(checksum, "->", newID)
 	return newID
 }
 
@@ -365,7 +364,6 @@ func (vm *VM) checksumToCodeID(checksum wasmvmtypes.Checksum) uint64 {
 func (vm *VM) codeIDToChecksum(codeID uint64) wasmvmtypes.Checksum {
 	// Retrieve checksum from mapping
 	if checksum, exists := vm.idToChecksum[codeID]; exists {
-		fmt.Println(codeID, "->", lib.BytesToString(checksum))
 		return checksum
 	}
 

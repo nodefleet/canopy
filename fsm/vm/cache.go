@@ -92,8 +92,6 @@ func (c *InMemoryCache) Size() uint32 {
 func (c *InMemoryCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	oldSize := len(c.data)
 	c.data = make(map[uint64][]byte)
 }
 
