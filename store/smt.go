@@ -192,7 +192,7 @@ func (s *SMT) Set(k, v []byte) (err lib.ErrorI) {
 func (s *SMT) set() lib.ErrorI {
 	// if current != target key then it is an insert not an update
 	if !s.target.Key.equals(s.gcp) {
-		s.opsLog = append(s.opsLog, fmt.Sprintf("insert: %s", lib.BytesToTruncatedString(s.target.Key.bytes())))
+		s.opsLog = append(s.opsLog, fmt.Sprintf("insert: %v\n%s", s.target.Key.bytes(), lib.BytesToString(s.target.Key.bytes())))
 		// create a new node (new parent of current and target)
 		newParent := newNode()
 		newParent.Key = s.gcp.copy()
@@ -1108,7 +1108,10 @@ func (x *node) replaceChild(oldKey, newKey []byte, smt *SMT) {
 		x.RightChildKey = bytes.Clone(newKey)
 		return
 	}
-	j, _ := lib.MarshalJSONIndentString(x)
+	fmt.Println(len(smt.operations))
+	j, _ := lib.MarshalJSONIndentString(smt.Root())
+	fmt.Println(j)
+	j, _ = lib.MarshalJSONIndentString(x)
 	fmt.Println(j)
 	for _, op := range smt.opsLog {
 		fmt.Println(op)
