@@ -284,12 +284,12 @@ func (s *SMT) CommitParallel(unsortedOps map[uint64]valueOp) (err lib.ErrorI) {
 		// create the subtree SMT
 		smt := &SMT{
 			store:        s.store,
-			root:         roots[i],
+			root:         roots[i].copy(),
 			keyBitLength: s.keyBitLength,
 			nodeCache:    make(map[string]*node),
 			operations:   groupedByPrefix[i],
-			minKey:       s.minKey,
-			maxKey:       s.maxKey,
+			minKey:       s.minKey.copy(),
+			maxKey:       s.maxKey.copy(),
 		}
 		wg.Add(1)
 		go func(smt *SMT) {
@@ -627,7 +627,7 @@ func (s *SMT) getNode(key []byte) (n *node, err lib.ErrorI) {
 		return
 	}
 	// set the key in the node for convenience
-	n.Key.fromBytes(key)
+	n.Key.fromBytes(bytes.Clone(key))
 	return
 }
 
