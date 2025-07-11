@@ -385,6 +385,13 @@ func (c *Controller) ApplyAndValidateBlock(block *lib.Block, commit bool) (b *li
 	}
 	// use the hash to compare two block headers for equality
 	if !bytes.Equal(compareHash, candidate.Hash) {
+		cand, _ := lib.MarshalJSONIndentString(candidate)
+		comp, _ := lib.MarshalJSONIndentString(compare)
+		exported, _ := c.FSM.ExportState()
+		state, _ := lib.MarshalJSONIndentString(exported)
+		c.log.Errorf("Candidate:\n:%s", cand)
+		c.log.Errorf("Compare:\n:%s", comp)
+		c.log.Errorf("State:\n:%s", comp)
 		return nil, lib.ErrUnequalBlockHash()
 	}
 	// validate VDF if committing randomly since this randomness is pseudo-non-deterministic (among nodes)
