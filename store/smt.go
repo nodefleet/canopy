@@ -144,7 +144,6 @@ func NewDefaultSMT(store lib.RWStoreI) (smt *SMT) {
 
 // NewSMT() creates a new abstraction of the SMT object
 func NewSMT(rootKey []byte, keyBitLen int, store lib.RWStoreI) (smt *SMT) {
-	var err lib.ErrorI
 	// create a new smt object
 	smt = &SMT{
 		store:        store,
@@ -156,10 +155,7 @@ func NewSMT(rootKey []byte, keyBitLen int, store lib.RWStoreI) (smt *SMT) {
 	// ensure the root key is the proper length based on the bit count
 	rKey := newNodeKey(bytes.Clone(rootKey), keyBitLen)
 	// get the root from the store
-	smt.root, err = smt.getNode(rKey.bytes())
-	if err != nil {
-		panic(err)
-	}
+	smt.root, _ = smt.getNode(rKey.bytes())
 	// if the root is empty, initialize with min and max node
 	if smt.root.LeftChildKey == nil {
 		smt.initializeTree(rKey)
