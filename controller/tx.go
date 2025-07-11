@@ -215,13 +215,13 @@ func (m *Mempool) CheckMempool() {
 		Transactions: m.GetTransactions(math.MaxUint64), // get all transactions in mempool - but apply block will only keep 'max-block' amount
 	}
 	// capture the tentative block result using a new object reference
-	blockResult, oversized, failed := new(lib.BlockResult), make([]*lib.TxResult, 0), make([]*lib.FailedTx, 0)
+	blockResult := new(lib.BlockResult)
 	// setup a context with cancel
 	ctx, stop := context.WithCancel(context.Background())
 	// set the cancel function
 	m.stop = stop
 	// apply the block against the state machine and populate the resulting merkle `roots` in the block header
-	block.BlockHeader, blockResult.Transactions, oversized, failed, err = m.FSM.ApplyBlock(ctx, block, true)
+	results, err := m.FSM.ApplyBlock(ctx, block, true)
 	if err != nil {
 		if err.Error() != lib.ErrMempoolStopSignal().Error() {
 			m.log.Errorf("Check Mempool error: %s", err.Error())
@@ -230,6 +230,9 @@ func (m *Mempool) CheckMempool() {
 		}
 		return
 	}
+	// set variables
+	block.BlockHeader = results.Header
+	blockResult.Transactions = results.TxResults
 	// cache the proposal
 	m.cachedProposal.Store(&CachedProposal{
 		Block:       block,
@@ -238,7 +241,7 @@ func (m *Mempool) CheckMempool() {
 	// create a cache of failed tx bytes to evict from the mempool
 	var failedTxBz [][]byte
 	// mark as failed in the cache
-	for _, tx := range failed {
+	for _, tx := range results.Failed {
 		// cache failed txs for RPC display
 		m.cachedFailedTxs.Add(tx)
 		// save the bytes
@@ -247,8 +250,8 @@ func (m *Mempool) CheckMempool() {
 	// evict all invalid transactions from the mempool
 	m.DeleteTransaction(failedTxBz...)
 	// log a warning
-	if len(failed) != 0 {
-		m.log.Warnf("Removed failed %d txs from mempool", len(failed))
+	if len(results.Failed) != 0 {
+		m.log.Warnf("Removed failed %d txs from mempool", len(results.Failed))
 	}
 	// reset the RPC cached results
 	m.cachedResults = nil
@@ -258,7 +261,7 @@ func (m *Mempool) CheckMempool() {
 		m.cachedResults = append(m.cachedResults, result)
 	}
 	// add results to cache
-	for _, result := range oversized {
+	for _, result := range results.OverSized {
 		// cache the results
 		result.Index = uint64(len(m.cachedResults))
 		m.cachedResults = append(m.cachedResults, result)

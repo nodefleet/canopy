@@ -3,10 +3,9 @@ package fsm
 import (
 	"bytes"
 	"encoding/json"
-	"slices"
-
 	"github.com/canopy-network/canopy/lib"
 	"github.com/canopy-network/canopy/lib/crypto"
+	"slices"
 )
 
 /* This file implements state actions on Validators and Delegators*/

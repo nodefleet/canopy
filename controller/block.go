@@ -368,25 +368,19 @@ func (c *Controller) ApplyAndValidateBlock(block *lib.Block, commit bool) (b *li
 	// log the start of 'apply block'
 	c.log.Debugf("Applying block %s for height %d", candidateHash[:20], candidateHeight)
 	// apply the block against the state machine
-	compare, txResults, _, failed, err := c.FSM.ApplyBlock(context.Background(), block, false)
+	compare, err := c.FSM.ApplyBlock(context.Background(), block, false)
 	if err != nil {
 		// exit with error
 		return
 	}
 	// if any transactions failed
-	if len(failed) != 0 {
+	if len(compare.Failed) != 0 {
 		return nil, lib.ErrFailedTransactions()
 	}
-	// compare the block headers for equality
-	compareHash, err := compare.SetHash()
-	if err != nil {
-		// exit with error
-		return
-	}
 	// use the hash to compare two block headers for equality
-	if !bytes.Equal(compareHash, candidate.Hash) {
+	if !bytes.Equal(compare.Header.Hash, candidate.Hash) {
 		cand, _ := lib.MarshalJSONIndentString(candidate)
-		comp, _ := lib.MarshalJSONIndentString(compare)
+		comp, _ := lib.MarshalJSONIndentString(compare.Header)
 		exported, _ := c.FSM.ExportState()
 		state, _ := lib.MarshalJSONIndentString(exported)
 		c.log.Errorf("Candidate:\n:%s", cand)
@@ -395,7 +389,7 @@ func (c *Controller) ApplyAndValidateBlock(block *lib.Block, commit bool) (b *li
 		return nil, lib.ErrUnequalBlockHash()
 	}
 	// validate VDF if committing randomly since this randomness is pseudo-non-deterministic (among nodes)
-	if commit && compare.Height > 1 && candidate.Vdf != nil {
+	if commit && compare.Header.Height > 1 && candidate.Vdf != nil {
 		// this design has similar security guarantees but lowers the computational requirements at a per-node basis
 		if rand.Intn(100) == 0 {
 			// validate the VDF included in the block
@@ -408,7 +402,7 @@ func (c *Controller) ApplyAndValidateBlock(block *lib.Block, commit bool) (b *li
 	// log that the proposal is valid
 	c.log.Infof("Block %s with %d txs is valid for height %d ✅ ", candidateHash[:20], len(block.Transactions), candidateHeight)
 	// exit with the valid results
-	return &lib.BlockResult{BlockHeader: candidate, Transactions: txResults}, nil
+	return &lib.BlockResult{BlockHeader: candidate, Transactions: compare.TxResults}, nil
 }
 
 // HandlePeerBlock() validates and handles an inbound certificate (with a block) from a remote peer

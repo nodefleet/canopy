@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/alecthomas/units"
-	"github.com/canopy-network/canopy/lib/crypto"
 	"math"
 	"slices"
+
+	"github.com/alecthomas/units"
+	"github.com/canopy-network/canopy/lib/crypto"
 )
 
 /* This file has logic to certify the next block and result decided by a bft quorum */

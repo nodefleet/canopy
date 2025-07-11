@@ -264,10 +264,10 @@ func TestApplyBlock(t *testing.T) {
 				sm.ProtocolVersion = 1
 			}
 			// execute the function call
-			header, txResults, _, failed, e := sm.ApplyBlock(context.Background(), test.block, false)
+			result, e := sm.ApplyBlock(context.Background(), test.block, false)
 			// validate the expected error
-			require.Equal(t, test.error != "", e != nil || len(failed) != 0, e)
-			if len(failed) != 0 {
+			require.Equal(t, test.error != "", e != nil || len(result.Failed) != 0, e)
+			if len(result.Failed) != 0 {
 				return
 			}
 			if e != nil {
@@ -275,9 +275,9 @@ func TestApplyBlock(t *testing.T) {
 				return
 			}
 			// validate got vs expected block header
-			require.EqualExportedValues(t, test.expectedHeader, header)
+			require.EqualExportedValues(t, test.expectedHeader, result.Header)
 			// validate got vs expected tx results
-			require.EqualExportedValues(t, test.expectedResults, txResults[0])
+			require.EqualExportedValues(t, test.expectedResults, result.TxResults[0])
 		})
 	}
 }

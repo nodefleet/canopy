@@ -33,6 +33,17 @@ type StateMachine struct {
 	cache              *cache                // the state machine cache
 }
 
+// ApplyBlockResult returns the result of ApplyBlock() call
+type ApplyBlockResult struct {
+	Header       *lib.BlockHeader // the header of the block
+	TxResults    []*lib.TxResult  // the results of the transactions of the block
+	OverSized    []*lib.TxResult  // the results of valid transactions not included in the block
+	Failed       []*lib.FailedTx  // the results of failed transactions which are never included in blocks
+	BlockTxs     [][]byte         // the bytes of the transactions included in the block
+	TxRoot       []byte           // the merkle root of the transactions
+	BlockTxCount int              // the count of transactions included in the block
+}
+
 // cache is the set of items to be cached used by the state machine
 type cache struct {
 	accounts  map[uint64]*Account // cache of accounts accessed
@@ -97,7 +108,8 @@ func (s *StateMachine) Initialize(store lib.StoreI) (genesis bool, err lib.Error
 // NOTES:
 // - this function may be used to validate 'additional' transactions outside the normal block size as if they were to be included
 // - a list of failed transactions are returned
-func (s *StateMachine) ApplyBlock(ctx context.Context, b *lib.Block, allowOversize bool) (header *lib.BlockHeader, txResults, oversized []*lib.TxResult, failed []*lib.FailedTx, err lib.ErrorI) {
+func (s *StateMachine) ApplyBlock(ctx context.Context, b *lib.Block, allowOversize bool) (result *ApplyBlockResult, err lib.ErrorI) {
+	result = new(ApplyBlockResult)
 	// catch in case there's a panic
 	defer func() {
 		if r := recover(); r != nil {
@@ -110,59 +122,59 @@ func (s *StateMachine) ApplyBlock(ctx context.Context, b *lib.Block, allowOversi
 	store, ok := s.Store().(lib.StoreI)
 	// casting fails, exit with error
 	if !ok {
-		return nil, nil, nil, nil, ErrWrongStoreType()
+		return nil, ErrWrongStoreType()
 	}
 	// automated execution at the 'beginning of a block'
 	if err = s.BeginBlock(); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	// apply all Transactions in the block
-	txResults, oversized, txRoot, blockTxs, failed, numTxs, err := s.ApplyTransactions(ctx, b.Transactions, allowOversize)
+	result, err = s.ApplyTransactions(ctx, b.Transactions, allowOversize)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	// sub-out transactions for those that succeeded (only useful for mempool application)
-	b.Transactions = blockTxs
+	b.Transactions = result.BlockTxs
 	// automated execution at the 'ending of a block'
 	if err = s.EndBlock(b.BlockHeader.ProposerAddress); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	// load the validator set for the previous height
 	lastValidatorSet, _ := s.LoadCommittee(s.Config.ChainId, s.Height()-1)
 	// calculate the merkle root of the last validators to maintain validator continuity between blocks (if root)
 	lastValidatorRoot, err := lastValidatorSet.ValidatorSet.Root()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	// load the 'next validator set' from the state
 	nextValidatorSet, _ := s.LoadCommittee(s.Config.ChainId, s.Height())
 	// calculate the merkle root of the next validators to maintain validator continuity between blocks (if root)
 	nextValidatorRoot, err := nextValidatorSet.ValidatorSet.Root()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	// calculate the merkle root of the state database to enable consensus on the result of the state after applying the block
 	stateRoot, err := store.Root()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	// load the last block from the indexer
 	lastBlock, err := s.LoadBlock(s.height - 1)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	// generate the block header
-	header = &lib.BlockHeader{
+	result.Header = &lib.BlockHeader{
 		Height:                s.Height(),                                                                   // increment the height
 		Hash:                  nil,                                                                          // set hash after
 		NetworkId:             s.NetworkID,                                                                  // ensure only applicable for the proper network
 		Time:                  b.BlockHeader.Time,                                                           // use the pre-set block time
-		NumTxs:                uint64(numTxs),                                                               // set the number of transactions
-		TotalTxs:              lastBlock.BlockHeader.TotalTxs + uint64(numTxs),                              // set the total count of transactions
+		NumTxs:                uint64(result.BlockTxCount),                                                  // set the number of transactions
+		TotalTxs:              lastBlock.BlockHeader.TotalTxs + uint64(result.BlockTxCount),                 // set the total count of transactions
 		TotalVdfIterations:    lastBlock.BlockHeader.TotalVdfIterations + b.BlockHeader.Vdf.GetIterations(), // add last total iterations to current iterations
 		StateRoot:             stateRoot,                                                                    // set the state root generated from the resulting state of the VDF
 		LastBlockHash:         nonEmptyHash(lastBlock.BlockHeader.Hash),                                     // set the last block hash to chain the blocks together
-		TransactionRoot:       nonEmptyHash(txRoot),                                                         // set the transaction root to easily merkle the transactions in a block
+		TransactionRoot:       nonEmptyHash(result.TxRoot),                                                  // set the transaction root to easily merkle the transactions in a block
 		ValidatorRoot:         nonEmptyHash(lastValidatorRoot),                                              // set the last validator root to easily prove the validators who voted on this block
 		NextValidatorRoot:     nonEmptyHash(nextValidatorRoot),                                              // set the next validator root to have continuity between validator sets
 		ProposerAddress:       b.BlockHeader.ProposerAddress,                                                // set the proposer address
@@ -170,8 +182,8 @@ func (s *StateMachine) ApplyBlock(ctx context.Context, b *lib.Block, allowOversi
 		LastQuorumCertificate: b.BlockHeader.LastQuorumCertificate,                                          // attach last quorum certificate (which is validated in the 'compare block headers' func
 	}
 	// create and set the block hash in the header
-	if _, err = header.SetHash(); err != nil {
-		return nil, nil, nil, nil, err
+	if _, err = result.Header.SetHash(); err != nil {
+		return nil, err
 	}
 	// exit
 	return
@@ -183,8 +195,8 @@ func (s *StateMachine) ApplyBlock(ctx context.Context, b *lib.Block, allowOversi
 // 3. Allows ephemeral 'oversize' transaction processing without applying 'oversize txn' changes to the state
 // 4. Returns the following for successful transactions within a block: <results, tx-list, root, count>
 // 5. Returns all transactions that failed during processing
-func (s *StateMachine) ApplyTransactions(
-	ctx context.Context, txs [][]byte, allowOversize bool) (results, oversized []*lib.TxResult, root []byte, blockTxs [][]byte, failed []*lib.FailedTx, n int, er lib.ErrorI) {
+func (s *StateMachine) ApplyTransactions(ctx context.Context, txs [][]byte, allowOversize bool) (applyResult *ApplyBlockResult, er lib.ErrorI) {
+	applyResult = new(ApplyBlockResult)
 	// define vars to track the bytes of the transaction results and the size of a block
 	var (
 		txResultsBytes [][]byte
@@ -198,7 +210,7 @@ func (s *StateMachine) ApplyTransactions(
 	// get the governance parameter for max block size
 	maxBlockSize, err := s.GetMaxBlockSize()
 	if err != nil {
-		return nil, nil, nil, nil, nil, 0, err
+		return nil, err
 	}
 	// keep a map to track transactions that failed 'check'
 	failedCheckTxs := map[int]error{}
@@ -221,18 +233,18 @@ func (s *StateMachine) ApplyTransactions(
 	for i, tx := range txs {
 		// if interrupt signal
 		if ctx.Err() != nil {
-			return nil, nil, nil, nil, nil, 0, lib.ErrMempoolStopSignal()
+			return nil, lib.ErrMempoolStopSignal()
 		}
 		// if already failed check tx or signature
 		if e, found := failedCheckTxs[i]; found {
-			failed = append(failed, lib.NewFailedTx(tx, e))
+			applyResult.Failed = append(applyResult.Failed, lib.NewFailedTx(tx, e))
 			continue
 		}
 		// calculate the hash of the transaction and convert it to a hex string
 		hashString := crypto.HashString(tx)
 		// check if the transaction is a 'same block' duplicate
 		if found := deDuplicator.Found(hashString); found {
-			return nil, nil, nil, nil, nil, 0, lib.ErrDuplicateTx(hashString)
+			return nil, lib.ErrDuplicateTx(hashString)
 		}
 		// get the tx size
 		txSize := uint64(len(tx))
@@ -240,13 +252,13 @@ func (s *StateMachine) ApplyTransactions(
 		if txSize+blockSize > maxBlockSize && !oversize {
 			// if validating a block - oversize shouldn't happen
 			if !allowOversize {
-				return nil, nil, nil, nil, nil, 0, ErrMaxBlockSize()
+				return nil, ErrMaxBlockSize()
 			}
 			// set oversize to 'true'
 			oversize = true
 			// wrap the store in a 'database transaction' to rollback all the 'oversize transactions'
 			if _, e := s.TxnWrap(); e != nil {
-				return nil, nil, nil, nil, nil, 0, e
+				return nil, e
 			}
 		}
 		// get the store from the state machine, it may be the original or a wrapped 'txn' if processing oversize transactions
@@ -254,13 +266,13 @@ func (s *StateMachine) ApplyTransactions(
 		// wrap the store in a 'database transaction' in case a rollback to the previous valid transaction is needed
 		txn, e := s.TxnWrap()
 		if e != nil {
-			return nil, nil, nil, nil, nil, 0, e
+			return nil, e
 		}
 		// apply the tx to the state machine, generating a transaction result
-		result, e := s.ApplyTransaction(uint64(n), tx, hashString, crypto.NewBatchVerifier(true))
+		result, e := s.ApplyTransaction(uint64(applyResult.BlockTxCount), tx, hashString, crypto.NewBatchVerifier(true))
 		if e != nil {
 			// add to the failed list
-			failed = append(failed, lib.NewFailedTx(tx, e))
+			applyResult.Failed = append(applyResult.Failed, lib.NewFailedTx(tx, e))
 			// discard the FSM cache
 			s.ResetCaches()
 			//txn.Discard()
@@ -269,25 +281,24 @@ func (s *StateMachine) ApplyTransactions(
 		} else {
 			// write the transaction to the underlying store
 			if err = txn.Flush(); err != nil {
-				return nil, nil, nil, nil, nil, 0, err
+				return nil, err
 			}
 			s.SetStore(currentStore)
 		}
 		// don't do any additional processing if oversize
 		if oversize {
-			// add to the oversized results
-			oversized = append(oversized, result)
+			applyResult.OverSized = append(applyResult.OverSized, result)
 			continue
 		}
 		// encode the result to bytes
 		txResultBz, e := lib.Marshal(result)
 		if e != nil {
-			return nil, nil, nil, nil, nil, 0, e
+			return nil, e
 		}
 		// add to the 'block transactions' list
-		blockTxs = append(blockTxs, tx)
+		applyResult.BlockTxs = append(applyResult.BlockTxs, tx)
 		// add the result to a list of transaction results
-		results = append(results, result)
+		applyResult.TxResults = append(applyResult.TxResults, result)
 		// add the bytes to the list of transactions results
 		txResultsBytes = append(txResultsBytes, txResultBz)
 		// add to the size of the block
@@ -298,14 +309,14 @@ func (s *StateMachine) ApplyTransactions(
 			largestTxSize = txSize
 		}
 		// update the transaction count
-		n++
+		applyResult.BlockTxCount++
 	}
 	// create a transaction root for the block header
-	root, _, err = lib.MerkleTree(txResultsBytes)
+	applyResult.TxRoot, _, err = lib.MerkleTree(txResultsBytes)
 	// update metrics
 	s.Metrics.UpdateLargestTxSize(largestTxSize)
 	// return and exit
-	return results, oversized, root, blockTxs, failed, n, err
+	return applyResult, err
 }
 
 // TimeMachine() creates a new StateMachine instance representing the blockchain state at a specified block height, allowing for a read-only view of the past state
