@@ -626,8 +626,8 @@ func (s *SMT) getNode(key []byte) (n *node, err lib.ErrorI) {
 	n = newNode()
 	// get the bytes of the node from the kv store
 	nodeBytes, err := s.store.Get(key)
-	if err != nil || nodeBytes == nil {
-		return
+	if err != nil || len(nodeBytes) == 0 {
+		return nil, lib.ErrPanic()
 	}
 	// convert the node bytes into a node object
 	if err = lib.Unmarshal(nodeBytes, n); err != nil {
@@ -1108,9 +1108,14 @@ func (x *node) replaceChild(oldKey, newKey []byte, smt *SMT) {
 		x.RightChildKey = bytes.Clone(newKey)
 		return
 	}
-	fmt.Println("NODE", x.Node)
+	j, _ := lib.MarshalJSONIndentString(x)
+	fmt.Println(j)
 	for _, op := range smt.opsLog {
 		fmt.Println(op)
+	}
+	for _, t := range smt.traversed.Nodes {
+		j, _ := lib.MarshalJSONIndentString(t)
+		fmt.Println(j)
 	}
 	fmt.Println("OLD_KEY", oldKey)
 	panic("no child node was replaced")
