@@ -391,7 +391,7 @@ func (c *Controller) ApplyAndValidateBlock(block *lib.Block, commit bool) (b *li
 		state, _ := lib.MarshalJSONIndentString(exported)
 		c.log.Errorf("Candidate:\n:%s", cand)
 		c.log.Errorf("Compare:\n:%s", comp)
-		c.log.Errorf("State:\n:%s", comp)
+		c.log.Errorf("State:\n:%s", state)
 		return nil, lib.ErrUnequalBlockHash()
 	}
 	// validate VDF if committing randomly since this randomness is pseudo-non-deterministic (among nodes)
