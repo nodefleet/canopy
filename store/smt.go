@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"fmt"
 	"math/bits"
 	"slices"
 	"sort"
@@ -97,6 +98,7 @@ type SMT struct {
 	unsortedOps map[string]*node
 	// OpData: data for each operation
 	OpData
+	opsLog []string
 	// define reserved keys
 	minKey *key
 	maxKey *key
@@ -190,6 +192,7 @@ func (s *SMT) Set(k, v []byte) (err lib.ErrorI) {
 func (s *SMT) set() lib.ErrorI {
 	// if current != target key then it is an insert not an update
 	if !s.target.Key.equals(s.gcp) {
+		s.opsLog = append(s.opsLog, fmt.Sprintf("insert: %s", lib.BytesToTruncatedString(s.target.Key.bytes())))
 		// create a new node (new parent of current and target)
 		newParent := newNode()
 		newParent.Key = s.gcp.copy()
@@ -198,7 +201,7 @@ func (s *SMT) set() lib.ErrorI {
 		// calculate current's bytes by encoding
 		currentBytes, targetBytes := s.current.Key.bytes(), s.target.Key.bytes()
 		// replace the reference to Current in its parent with the new parent
-		oldParent.replaceChild(currentBytes, newParent.Key.bytes())
+		oldParent.replaceChild(currentBytes, newParent.Key.bytes(), s)
 		// set current and target as children of new parent
 		// NOTE: the old parent is now the grandparent of target and current
 		switch s.pathBit = s.target.Key.bitAt(s.bitPos); s.pathBit {
@@ -210,6 +213,8 @@ func (s *SMT) set() lib.ErrorI {
 		// add new node to traversed list, as it's the new parent for current and target
 		// and should come after the grandparent (previously parent)
 		s.traversed.Nodes = append(s.traversed.Nodes, newParent.copy())
+	} else {
+		s.opsLog = append(s.opsLog, fmt.Sprintf("update: %s", lib.BytesToTruncatedString(s.target.Key.bytes())))
 	}
 	// set the node in the database
 	return s.setNode(s.target)
@@ -233,8 +238,10 @@ func (s *SMT) Delete(k []byte) (err lib.ErrorI) {
 func (s *SMT) delete() lib.ErrorI {
 	// if gcp != target key then there is no delete because the node does not exist
 	if !s.target.Key.equals(s.gcp) {
+		s.opsLog = append(s.opsLog, fmt.Sprintf("del_not_found: %s", lib.BytesToTruncatedString(s.target.Key.bytes())))
 		return nil
 	}
+	s.opsLog = append(s.opsLog, fmt.Sprintf("del: %s", lib.BytesToTruncatedString(s.target.Key.bytes())))
 	// calculate target key bytes
 	targetBytes := s.target.Key.bytes()
 	// get the parent and grandparent
@@ -242,7 +249,7 @@ func (s *SMT) delete() lib.ErrorI {
 	// get the sibling of the target
 	sibling, _ := parent.getOtherChild(targetBytes)
 	// replace the parent reference with the sibling in the grandparent
-	grandparent.replaceChild(parent.Key.bytes(), sibling)
+	grandparent.replaceChild(parent.Key.bytes(), sibling, s)
 	// delete the parent from the database and remove it from the traversal array
 	if err := s.delNode(parent.Key.bytes()); err != nil {
 		return err
@@ -592,29 +599,29 @@ func (s *SMT) setNode(n *node) lib.ErrorI {
 		s.nodeCache = make(map[string]*node, MaxCacheSize)
 	}
 	// set in cache
-	s.nodeCache[string(n.Key.bytes())] = n
+	//s.nodeCache[string(n.Key.bytes())] = n
 	// convert the node object to bytes
 	nodeBytes, err := n.bytes()
 	if err != nil {
 		return err
 	}
 	// set the bytes under the key in the store
-	return s.store.Set(n.Key.bytes(), nodeBytes)
+	return s.store.Set(bytes.Clone(n.Key.bytes()), nodeBytes)
 }
 
 // delNode() remove a node from the database given its unique identifier
 func (s *SMT) delNode(key []byte) lib.ErrorI {
-	delete(s.nodeCache, string(key))
-	return s.store.Delete(key)
+	//delete(s.nodeCache, string(key))
+	return s.store.Delete(bytes.Clone(key))
 }
 
 // getNode() retrieves a node object from the database
 func (s *SMT) getNode(key []byte) (n *node, err lib.ErrorI) {
 	// check cache
-	n, found := s.nodeCache[string(key)]
-	if found {
-		return n, nil
-	}
+	//n, found := s.nodeCache[string(key)]
+	//if found {
+	//	return n, nil
+	//}
 	// initialize a reference to a node object
 	n = newNode()
 	// get the bytes of the node from the kv store
@@ -1092,7 +1099,7 @@ func (x *node) getOtherChild(childKey []byte) ([]byte, byte) {
 }
 
 // replaceChild() replaces the child reference with a new key
-func (x *node) replaceChild(oldKey, newKey []byte) {
+func (x *node) replaceChild(oldKey, newKey []byte, smt *SMT) {
 	switch {
 	case bytes.Equal(x.LeftChildKey, oldKey):
 		x.LeftChildKey = bytes.Clone(newKey)
@@ -1101,6 +1108,11 @@ func (x *node) replaceChild(oldKey, newKey []byte) {
 		x.RightChildKey = bytes.Clone(newKey)
 		return
 	}
+	fmt.Println("NODE", x.Node)
+	for _, op := range smt.opsLog {
+		fmt.Println(op)
+	}
+	fmt.Println("OLD_KEY", oldKey)
 	panic("no child node was replaced")
 }
 
