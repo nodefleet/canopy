@@ -113,6 +113,14 @@ func (b *BFT) Start() {
 			func() {
 				b.Controller.Lock()
 				defer b.Controller.Unlock()
+				// calculate the process time
+				var processTime time.Duration
+				// calculate time since
+				since := time.Since(resetBFT.StartTime)
+				// allow if 'since' is less than 1 block old
+				if int(since.Milliseconds()) < b.Config.BlockTimeMS() {
+					processTime = since
+				}
 				// if is a root-chain update reset back to round 0 but maintain locks to prevent 'fork attacks'
 				// else increment the height and don't maintain locks
 				if !resetBFT.IsRootChainUpdate {
@@ -123,7 +131,7 @@ func (b *BFT) Start() {
 					b.NewHeight(true)
 				}
 				// set the wait timers to start consensus
-				b.SetWaitTimers(time.Duration(b.Config.NewHeightTimeoutMs)*time.Millisecond, resetBFT.ProcessTime)
+				b.SetWaitTimers(time.Duration(b.Config.NewHeightTimeoutMs)*time.Millisecond, processTime)
 			}()
 		}
 	}
@@ -468,10 +476,15 @@ func (b *BFT) StartCommitProcessPhase() {
 	b.ByzantineEvidence = &ByzantineEvidence{
 		DSE: b.GetLocalDSE(),
 	}
-	// send the block to self for committing
-	b.SelfSendBlock(msg.Qc)
-	// gossip committed block message to peers
-	b.GossipBlock(msg.Qc, b.PublicKey)
+	// non-blocking
+	go func() {
+		// send the block to self for committing
+		b.SelfSendBlock(msg.Qc, msg.Timestamp)
+		// wait to allow for CommitProcess to finish
+		<-time.After(time.Duration(b.Config.CommitTimeoutMS) * time.Millisecond)
+		// gossip committed block message to peers
+		b.GossipBlock(msg.Qc, b.PublicKey, msg.Timestamp)
+	}()
 }
 
 // RoundInterrupt() begins the ROUND-INTERRUPT phase after any phase errors
@@ -720,7 +733,7 @@ func (b *BFT) msLeftInRound() int {
 // - Phase Timeout ensures the node waits for a configured duration (Round x phaseTimeout) to allow for full voter participation
 // This design balances synchronization speed during adverse conditions with maximizing voter participation under normal conditions
 func (b *BFT) SetWaitTimers(phaseWaitTime, processTime time.Duration) {
-	//b.log.Debugf("Process time: %.2fs, Wait time: %.2fs", processTime.Seconds(), phaseWaitTime.Seconds())
+	b.log.Debugf("Process time: %.2fs, Wait time: %.2fs", processTime.Seconds(), phaseWaitTime.Seconds())
 	subtract := func(wt, pt time.Duration) (t time.Duration) {
 		if pt > 24*time.Hour {
 			return wt
@@ -732,7 +745,7 @@ func (b *BFT) SetWaitTimers(phaseWaitTime, processTime time.Duration) {
 	}
 	// calculate the phase timer by subtracting the process time
 	phaseWaitTime = subtract(phaseWaitTime, processTime)
-	//b.log.Debugf("Setting consensus timer: %.2f sec", phaseWaitTime.Seconds())
+	b.log.Debugf("Setting consensus timer: %.2f sec", phaseWaitTime.Seconds())
 	// set Phase timers to go off in their respective timeouts
 	lib.ResetTimer(b.PhaseTimer, phaseWaitTime)
 }
@@ -834,9 +847,9 @@ type (
 		// LoadCertificate() gets the Quorum Certificate from the chainId-> plugin at a certain height
 		LoadCertificate(height uint64) (*lib.QuorumCertificate, lib.ErrorI)
 		// GossipBlock() is a P2P call to gossip a completed Quorum Certificate with a Proposal
-		GossipBlock(certificate *lib.QuorumCertificate, sender []byte)
+		GossipBlock(certificate *lib.QuorumCertificate, sender []byte, timestamp uint64)
 		// SendToSelf() is a P2P call to directly send  a completed Quorum Certificate to self
-		SelfSendBlock(qc *lib.QuorumCertificate)
+		SelfSendBlock(qc *lib.QuorumCertificate, timestamp uint64)
 		// SendToReplicas() is a P2P call to directly send a Consensus message to all Replicas
 		SendToReplicas(replicas lib.ValidatorSet, msg lib.Signable)
 		// SendToProposer() is a P2P call to directly send a Consensus message to the Leader
@@ -867,7 +880,7 @@ type (
 
 type ResetBFT struct {
 	IsRootChainUpdate bool
-	ProcessTime       time.Duration
+	StartTime         time.Time
 }
 
 const (

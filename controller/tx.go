@@ -14,7 +14,7 @@ import (
 // SendTxMsg() routes a locally generated transaction message to the listener for processing + gossiping
 func (c *Controller) SendTxMsg(tx []byte) lib.ErrorI {
 	// create a transaction message object using the tx bytes and the chain id
-	msg := &lib.TxMessage{ChainId: c.Config.ChainId, Tx: tx}
+	msg := &lib.TxMessage{ChainId: c.Config.ChainId, Txs: [][]byte{tx}}
 	// send the transaction message to the listener using internal routing
 	return c.P2P.SelfSend(c.PublicKey, Tx, msg)
 }
@@ -44,10 +44,9 @@ func (c *Controller) ListenForTx() {
 			}
 			// create a convenience variable for the identity of the sender
 			senderID := msg.Sender.Address.PublicKey
-			// try to cast the p2p message as a tx message
-			txMsg, ok := msg.Message.(*lib.TxMessage)
-			// if the cast failed
-			if !ok {
+			// try to unmarshal the p2p message as a tx message
+			txMsg := new(lib.TxMessage)
+			if err := lib.Unmarshal(msg.Message, txMsg); err != nil {
 				// log the unexpected behavior
 				c.log.Warnf("Non-Tx message from %s", lib.BytesToTruncatedString(senderID))
 				// slash the peer's reputation score
@@ -64,28 +63,30 @@ func (c *Controller) ListenForTx() {
 				// exit
 				return
 			}
-			// route the transaction to the mempool handler
-			if err := c.HandleTransaction(txMsg.Tx); err != nil {
-				// if the error is 'mempool already has it'
-				if err.Error() == lib.ErrTxFoundInMempool(crypto.HashString(txMsg.Tx)).Error() {
+			for _, tx := range txMsg.Txs {
+				// route the transaction to the mempool handler
+				if err := c.HandleTransaction(tx); err != nil {
+					// if the error is 'mempool already has it'
+					if err.Error() == lib.ErrTxFoundInMempool(crypto.HashString(tx)).Error() {
+						// exit
+						return
+					}
+					// else - warn of the error
+					c.log.Warnf("Handle tx from %s failed with err: %s", lib.BytesToTruncatedString(senderID), err.Error())
+					// slash the peers reputation score
+					c.P2P.ChangeReputation(senderID, p2p.InvalidTxRep)
 					// exit
 					return
 				}
-				// else - warn of the error
-				c.log.Warnf("Handle tx from %s failed with err: %s", lib.BytesToTruncatedString(senderID), err.Error())
-				// slash the peers reputation score
-				c.P2P.ChangeReputation(senderID, p2p.InvalidTxRep)
-				// exit
-				return
-			}
-			// log the receipt of the valid transaction
-			c.log.Infof("Received valid transaction %s from %s for chain %d", crypto.ShortHashString(txMsg.Tx), lib.BytesToTruncatedString(senderID), txMsg.ChainId)
-			// bump peer reputation positively
-			c.P2P.ChangeReputation(senderID, p2p.GoodTxRep)
-			// gossip the transaction to peers
-			if err := c.P2P.SendToPeers(Tx, msg.Message, lib.BytesToString(senderID)); err != nil {
-				// log the gossip error
-				c.log.Error(fmt.Sprintf("unable to gossip tx with err: %s", err.Error()))
+				// log the receipt of the valid transaction
+				c.log.Infof("Received valid transaction %s from %s for chain %d", crypto.ShortHashString(tx), lib.BytesToTruncatedString(senderID), txMsg.ChainId)
+				// bump peer reputation positively
+				c.P2P.ChangeReputation(senderID, p2p.GoodTxRep)
+				// gossip the transaction to peers
+				if err := c.P2P.SendToPeers(Tx, &lib.TxMessage{ChainId: c.Config.ChainId, Txs: [][]byte{tx}}, lib.BytesToString(senderID)); err != nil {
+					// log the gossip error
+					c.log.Error(fmt.Sprintf("unable to gossip tx with err: %s", err.Error()))
+				}
 			}
 			// onto the next message
 		}()
