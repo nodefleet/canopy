@@ -19,6 +19,7 @@ type BFT struct {
 	ProposerKey   []byte                 // the public key of the proposer
 	ValidatorSet  ValSet                 // the current set of Validators
 	HighQC        *QC                    // the highest PRECOMMIT quorum certificate the node is aware of for this Height
+	RCBuildHeight uint64                 // the build height of the locked proposal
 	Block         []byte                 // the current Block being voted on (the foundational unit of the blockchain)
 	BlockHash     []byte                 // the current hash of the block being voted on
 	Results       *lib.CertificateResult // the current Result being voted on (reward and slash recipients)
@@ -253,6 +254,7 @@ func (b *BFT) StartElectionVotePhase() {
 		HighQc:                 b.HighQC,                         // forward highest known 'Lock' for this Height, so the new Proposer may satisfy SAFE-NODE-PREDICATE
 		LastDoubleSignEvidence: b.ByzantineEvidence.DSE.Evidence, // forward any evidence of DoubleSigning
 		Vdf:                    b.HighVDF,                        // forward local VDF to the candidate
+		RcBuildHeight:          b.RCBuildHeight,                  // forward the highQC build height (if applicable)
 	})
 }
 
@@ -274,7 +276,7 @@ func (b *BFT) StartProposePhase() {
 	b.log.Info("Self is the proposer")
 	// produce new proposal or use highQC as the proposal
 	if b.HighQC == nil {
-		b.Block, b.Results, err = b.ProduceProposal(b.ByzantineEvidence, b.HighVDF)
+		b.RCBuildHeight, b.Block, b.Results, err = b.ProduceProposal(b.ByzantineEvidence, b.HighVDF)
 		if err != nil {
 			b.log.Error(err.Error())
 			return
@@ -296,6 +298,7 @@ func (b *BFT) StartProposePhase() {
 		},
 		HighQc:                 b.HighQC,                         // nil or justifies the proposal
 		LastDoubleSignEvidence: b.ByzantineEvidence.DSE.Evidence, // evidence is attached (if any) to validate the Proposal
+		RcBuildHeight:          b.RCBuildHeight,                  // the root chain height when the block was built
 	})
 }
 
@@ -327,12 +330,24 @@ func (b *BFT) StartProposeVotePhase() {
 			return
 		}
 	}
+	// load committee data
+	cd, err := b.Controller.LoadCommitteeData()
+	if err != nil {
+		b.log.Error(err.Error())
+		b.RoundInterrupt()
+	}
+	// ensure the build height isn't too old
+	if msg.RcBuildHeight < cd.LastRootHeightUpdated {
+		b.log.Error("invalid root chain build height")
+		b.RoundInterrupt()
+		return
+	}
 	// aggregate any evidence submitted from the replicas
 	byzantineEvidence := &ByzantineEvidence{
 		DSE: NewDSE(msg.LastDoubleSignEvidence),
 	}
 	// check candidate block against FSM
-	if err := b.ValidateProposal(msg.Qc, byzantineEvidence); err != nil {
+	if _, err := b.ValidateProposal(msg.RcBuildHeight, msg.Qc, byzantineEvidence); err != nil {
 		b.log.Error(err.Error())
 		b.RoundInterrupt()
 		return
@@ -384,6 +399,7 @@ func (b *BFT) StartPrecommitPhase() {
 			ProposerKey: b.ProposerKey,
 			Signature:   as,
 		},
+		RcBuildHeight: b.RCBuildHeight,
 	})
 }
 
@@ -407,6 +423,7 @@ func (b *BFT) StartPrecommitVotePhase() {
 	}
 	// `lock` on the proposal (only by satisfying the SAFE-NODE-PREDICATE or COMMIT can this node unlock)
 	b.HighQC = msg.Qc
+	b.RCBuildHeight = msg.RcBuildHeight
 	b.HighQC.Block = b.Block
 	b.HighQC.Results = b.Results
 	b.log.Infof("🔒 Locked on proposal %s", lib.BytesToTruncatedString(b.HighQC.BlockHash))
@@ -449,6 +466,7 @@ func (b *BFT) StartCommitPhase() {
 			ProposerKey: b.ProposerKey,
 			Signature:   as,
 		},
+		Timestamp: uint64(time.Now().UnixMicro()),
 	})
 }
 
@@ -621,6 +639,7 @@ func (b *BFT) NewHeight(keepLocks ...bool) {
 		// reset PartialQCs
 		b.PartialQCs = make(PartialQCs)
 		b.HighQC = nil
+		b.RCBuildHeight = 0
 	}
 }
 
@@ -841,9 +860,9 @@ type (
 		// RootChainHeight returns the height of the root-chain
 		RootChainHeight() uint64
 		// ProduceProposal() as a Leader, create a Proposal in the form of a block and certificate results
-		ProduceProposal(be *ByzantineEvidence, vdf *crypto.VDF) (block []byte, results *lib.CertificateResult, err lib.ErrorI)
+		ProduceProposal(be *ByzantineEvidence, vdf *crypto.VDF) (rcBuildHeight uint64, block []byte, results *lib.CertificateResult, err lib.ErrorI)
 		// ValidateCertificate() as a Replica, validates the leader proposal
-		ValidateProposal(qc *lib.QuorumCertificate, evidence *ByzantineEvidence) lib.ErrorI
+		ValidateProposal(rcBuildHeight uint64, qc *lib.QuorumCertificate, evidence *ByzantineEvidence) (*lib.BlockResult, lib.ErrorI)
 		// LoadCertificate() gets the Quorum Certificate from the chainId-> plugin at a certain height
 		LoadCertificate(height uint64) (*lib.QuorumCertificate, lib.ErrorI)
 		// GossipBlock() is a P2P call to gossip a completed Quorum Certificate with a Proposal

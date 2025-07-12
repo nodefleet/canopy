@@ -134,7 +134,7 @@ func (c *Controller) SelfSendBlock(qc *lib.QuorumCertificate, timestamp uint64) 
 // BFT FUNCTIONS BELOW
 
 // ProduceProposal() create a proposal in the form of a `block` and `certificate result` for the bft process
-func (c *Controller) ProduceProposal(evidence *bft.ByzantineEvidence, vdf *crypto.VDF) (blockBytes []byte, results *lib.CertificateResult, err lib.ErrorI) {
+func (c *Controller) ProduceProposal(evidence *bft.ByzantineEvidence, vdf *crypto.VDF) (rcBuildHeight uint64, blockBytes []byte, results *lib.CertificateResult, err lib.ErrorI) {
 	c.log.Debugf("Producing proposal as leader")
 	// configure the FSM in 'consensus mode' for validator proposals
 	resetProposalConfig := c.SetFSMInConsensusModeForProposals()
@@ -163,6 +163,7 @@ func (c *Controller) ProduceProposal(evidence *bft.ByzantineEvidence, vdf *crypt
 		// exit with error
 		return
 	}
+	rcBuildHeight = c.RootChainHeight()
 	// create the actual block structure with the maximum amount of transactions allowed or available in the mempool
 	block := &lib.Block{
 		BlockHeader:  &lib.BlockHeader{Time: uint64(time.Now().UnixMicro()), ProposerAddress: c.Address, LastQuorumCertificate: lastCertificate, Vdf: vdf},
@@ -191,7 +192,7 @@ func (c *Controller) ProduceProposal(evidence *bft.ByzantineEvidence, vdf *crypt
 }
 
 // ValidateProposal() fully validates a proposal in the form of a quorum certificate and resets back to begin block state
-func (c *Controller) ValidateProposal(qc *lib.QuorumCertificate, evidence *bft.ByzantineEvidence) (err lib.ErrorI) {
+func (c *Controller) ValidateProposal(rcBuildHeight uint64, qc *lib.QuorumCertificate, evidence *bft.ByzantineEvidence) (blockResult *lib.BlockResult, err lib.ErrorI) {
 	// log the beginning of proposal validation
 	c.log.Debugf("Validating proposal from leader")
 	// configure the FSM in 'consensus mode' for validator proposals
@@ -210,7 +211,7 @@ func (c *Controller) ValidateProposal(qc *lib.QuorumCertificate, evidence *bft.B
 		return
 	}
 	// play the block against the state machine to generate a block result
-	blockResult, err := c.ApplyAndValidateBlock(block, false)
+	blockResult, err = c.ApplyAndValidateBlock(block, false)
 	if err != nil {
 		// exit with error
 		return
@@ -220,7 +221,7 @@ func (c *Controller) ValidateProposal(qc *lib.QuorumCertificate, evidence *bft.B
 	// ensure generated the same results
 	if !qc.Results.Equals(compareResults) {
 		// exit with error
-		return fsm.ErrMismatchCertResults()
+		return nil, fsm.ErrMismatchCertResults()
 	}
 	// exit
 	return
