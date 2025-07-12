@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"github.com/canopy-network/canopy/lib/crypto"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -285,10 +286,26 @@ func (s *Store) Root(caller string) (root []byte, err lib.ErrorI) {
 	if s.sc == nil {
 		// set up the state commit store
 		s.sc = NewDefaultSMT(NewTxn(s.ss.reader.(BadgerTxnReader), s.writer, []byte(stateCommitIDPrefix), false, false, nextVersion, false))
-		// commit the SMT directly using the cache ops
-		if err = s.sc.CommitParallel(s.ss.cache.ops, caller); err != nil {
+		// custom logic below
+		for _, operation := range s.ss.cache.ops {
+			value, del := []byte(nil), true
+			if operation.op != opDelete && !entryIsDelete(operation.entry) {
+				value, del = crypto.Hash(operation.value), false
+			}
+			n := &node{Key: newNodeKey(crypto.Hash(operation.key), s.sc.keyBitLength), Node: lib.Node{Value: value}, delete: del}
+			// check to make sure the target is valid
+			if err = s.sc.validateTarget(n); err != nil {
+				return
+			}
+			s.sc.addOperation(n)
+		}
+		if err := s.sc.Commit(); err != nil {
 			return nil, err
 		}
+		// commit the SMT directly using the cache ops
+		//if err = s.sc.CommitParallel(s.ss.cache.ops, caller); err != nil {
+		//	return nil, err
+		//}
 	}
 	// return the root
 	return s.sc.Root(), nil
