@@ -642,6 +642,9 @@ func (r BadgerTxnReader) Discard() { r.Txn.Discard() }
 // badger doesn't yet allow users to explicitly set keys as *do not discard*
 // https://github.com/hypermodeinc/badger/issues/2192
 func setMeta(e *badger.Entry, value byte) {
+	if e == nil {
+		return
+	}
 	v := reflect.ValueOf(e).Elem()
 	f := v.FieldByName(badgerMetaFieldName)
 	ptr := unsafe.Pointer(f.UnsafeAddr())
@@ -650,6 +653,9 @@ func setMeta(e *badger.Entry, value byte) {
 
 // getMeta() accesses the private field 'meta' of badgerDB's 'Entry'
 func getMeta(entry *badger.Entry) byte {
+	if entry == nil {
+		return 0
+	}
 	v := reflect.ValueOf(entry).Elem()
 	f := v.FieldByName("meta")
 	return *(*byte)(unsafe.Pointer(f.UnsafeAddr()))
