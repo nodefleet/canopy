@@ -1109,7 +1109,7 @@ func (x *node) replaceChild(oldKey, newKey []byte, smt *SMT) {
 		return
 	}
 	fmt.Println(len(smt.operations))
-	j, _ := lib.MarshalJSONIndentString(smt.Root())
+	j, _ := lib.MarshalJSONIndentString(smt.root)
 	fmt.Println(j)
 	j, _ = lib.MarshalJSONIndentString(x)
 	fmt.Println(j)

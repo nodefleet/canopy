@@ -283,6 +283,7 @@ func (s *Store) DB() *badger.DB { return s.db }
 func (s *Store) Root() (root []byte, err lib.ErrorI) {
 	nextVersion := s.version + 1
 	if s.sc == nil {
+		fmt.Println("Root()")
 		// set up the state commit store
 		s.sc = NewDefaultSMT(NewTxn(s.ss.reader.(BadgerTxnReader), s.writer, []byte(stateCommitIDPrefix), false, false, nextVersion, false))
 		// commit the SMT directly using the cache ops
