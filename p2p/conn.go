@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/canopy-network/canopy/lib/crypto"
+
 	"github.com/alecthomas/units"
 	"github.com/canopy-network/canopy/lib"
 	limiter "github.com/mxk/go-flowrate/flowrate"
@@ -77,14 +79,6 @@ type MultiConn struct {
 
 // NewConnection() creates and starts a new instance of a MultiConn
 func (p *P2P) NewConnection(conn net.Conn) (*MultiConn, lib.ErrorI) {
-	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		if err := tcpConn.SetWriteBuffer(32 * 1024 * 1024); err != nil {
-			p.log.Warnf("Failed to set write buffer: %v", err)
-		}
-		if err := tcpConn.SetReadBuffer(32 * 1024 * 1024); err != nil {
-			p.log.Warnf("Failed to set write buffer: %v", err)
-		}
-	}
 	// establish an encrypted connection using the handshake
 	eConn, err := NewHandshake(conn, p.meta, p.privateKey)
 	if err != nil {
@@ -312,14 +306,13 @@ func (c *MultiConn) waitForAndHandleWireBytes(m *limiter.Monitor) (proto.Message
 // message may be a Packet, a Ping or a Pong
 func (c *MultiConn) sendPacket(packet *Packet, m *limiter.Monitor) {
 	if packet != nil {
-		//c.log.Debugf("Send Packet to %s (ID:%s, L:%d, E:%t), hash: %s",
-		//	lib.BytesToTruncatedString(c.Address.PublicKey),
-		//	lib.Topic_name[int32(packet.StreamId)],
-		//	len(packet.Bytes),
-		//	packet.Eof,
-		//	crypto.ShortHashString(packet.Bytes),
-		//)
-		//defer c.log.Debugf("Done sending: %s", crypto.ShortHashString(packet.Bytes))
+		c.log.Debugf("Send Packet to %s (ID:%s, L:%d, E:%t), hash: %s",
+			lib.BytesToTruncatedString(c.Address.PublicKey),
+			lib.Topic_name[int32(packet.StreamId)],
+			len(packet.Bytes),
+			packet.Eof,
+			crypto.ShortHashString(packet.Bytes),
+		)
 	}
 	// send packet as message over the wire
 	c.sendWireBytes(packet, m)
@@ -392,14 +385,13 @@ func (s *Stream) queueSend(p *Packet) bool {
 // handlePacket() merge the new packet with the previously received ones until the entire message is complete (EOF signal)
 func (s *Stream) handlePacket(peerInfo *lib.PeerInfo, packet *Packet) (int32, lib.ErrorI) {
 	msgAssemblerLen, packetLen := len(s.msgAssembler), len(packet.Bytes)
-	//s.logger.Debugf("Received Packet from %s (ID:%s, L:%d, E:%t), hash: %s",
-	//	lib.BytesToTruncatedString(peerInfo.Address.PublicKey),
-	//	lib.Topic_name[int32(packet.StreamId)],
-	//	len(packet.Bytes),
-	//	packet.Eof,
-	//	crypto.ShortHashString(packet.Bytes),
-	//)
-	//defer s.logger.Debugf("Done receiving: %s", crypto.ShortHashString(packet.Bytes))
+	s.logger.Debugf("Received Packet from %s (ID:%s, L:%d, E:%t), hash: %s",
+		lib.BytesToTruncatedString(peerInfo.Address.PublicKey),
+		lib.Topic_name[int32(packet.StreamId)],
+		len(packet.Bytes),
+		packet.Eof,
+		crypto.ShortHashString(packet.Bytes),
+	)
 	// if the addition of this new packet pushes the total message size above max
 	if int(maxMessageSize) < msgAssemblerLen+packetLen {
 		s.msgAssembler = s.msgAssembler[:0]
@@ -508,9 +500,6 @@ func receiveLengthPrefixed(conn net.Conn) ([]byte, lib.ErrorI) {
 
 // split returns bytes split to size up to the lim param
 func split(buf []byte, lim int) [][]byte {
-	if len(buf) == 0 {
-		return [][]byte{buf}
-	}
 	var chunk []byte
 	chunks := make([][]byte, 0, len(buf)/lim+1)
 	for len(buf) >= lim {

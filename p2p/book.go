@@ -21,7 +21,7 @@ const (
 	MaxFailedDialAttempts        = 5               // maximum times a peer may fail a churn management dial attempt before evicted from the peer book
 	MaxPeersExchanged            = 5               // maximum number of peers per chain that may be sent/received during a peer exchange
 	MaxPeerBookRequestsPerWindow = 2               // maximum peer book request per window
-	PeerBookRequestWindowS       = 30              // seconds in a peer book request
+	PeerBookRequestWindowS       = 120             // seconds in a peer book request
 	PeerBookRequestTimeoutS      = 5               // timeout in seconds of the peer book
 	CrawlAndCleanBookFrequency   = time.Hour       // how often the book is cleaned and crawled
 	SaveBookFrequency            = time.Minute * 5 // how often the book is saved to a file
@@ -75,10 +75,11 @@ func (p *P2P) SendPeerBookRequests() {
 		// rate limit with sleep timer
 		time.Sleep(time.Duration(sleepTime) * time.Second)
 		// send the request
-		if err := p.SendToPeers(lib.Topic_PEERS_REQUEST, &PeerBookRequestMessage{}); err != nil {
+		peerInfo, err := p.SendToRandPeer(lib.Topic_PEERS_REQUEST, &PeerBookRequestMessage{})
+		if peerInfo == nil || err != nil {
 			continue
 		}
-		p.log.Debugf("Sent peer book request to all peers")
+		p.log.Debugf("Sent peer book request to %s", lib.BytesToTruncatedString(peerInfo.Address.PublicKey))
 		select {
 		// fires when received the response to the request
 		case msg := <-p.Inbox(lib.Topic_PEERS_RESPONSE):
@@ -89,6 +90,12 @@ func (p *P2P) SendPeerBookRequests() {
 			if !ok {
 				p.log.Warnf("Invalid peer book response from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
 				p.ChangeReputation(senderID, InvalidMsgRep)
+				continue
+			}
+			// ensure it's the expected sender
+			if !bytes.Equal(msg.Sender.Address.PublicKey, peerInfo.Address.PublicKey) {
+				p.log.Warnf("Unexpected peer book response from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
+				p.ChangeReputation(senderID, UnexpectedMsgRep)
 				continue
 			}
 			// if they sent too many peers
@@ -104,7 +111,8 @@ func (p *P2P) SendPeerBookRequests() {
 			p.ChangeReputation(senderID, GoodPeerBookRespRep)
 			// fires when request times out
 		case <-time.After(PeerBookRequestTimeoutS * time.Second):
-			p.log.Warnf("Peer book timeout")
+			p.log.Warnf("Peer book timeout from %s", lib.BytesToTruncatedString(peerInfo.Address.PublicKey))
+			p.ChangeReputation(peerInfo.Address.PublicKey, PeerBookReqTimeoutRep)
 			continue
 		}
 	}
