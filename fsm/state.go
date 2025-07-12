@@ -154,7 +154,7 @@ func (s *StateMachine) ApplyBlock(ctx context.Context, b *lib.Block, allowOversi
 		return nil, err
 	}
 	// calculate the merkle root of the state database to enable consensus on the result of the state after applying the block
-	stateRoot, err := store.Root()
+	stateRoot, err := store.Root(lib.GetStackTrace())
 	if err != nil {
 		return nil, err
 	}

@@ -178,7 +178,7 @@ func (s *Store) Copy() (lib.StoreI, lib.ErrorI) {
 // Commit() performs a single atomic write of the current state to all stores.
 func (s *Store) Commit() (root []byte, err lib.ErrorI) {
 	// get the root from the sparse merkle tree at the current state
-	root, err = s.Root()
+	root, err = s.Root(lib.GetStackTrace())
 	if err != nil {
 		return nil, err
 	}
@@ -280,14 +280,13 @@ func (s *Store) DB() *badger.DB { return s.db }
 
 // Root() retrieves the root hash of the StateCommitStore, representing the current root of the
 // Sparse Merkle Tree. This hash is used for verifying the integrity and consistency of the state.
-func (s *Store) Root() (root []byte, err lib.ErrorI) {
+func (s *Store) Root(caller string) (root []byte, err lib.ErrorI) {
 	nextVersion := s.version + 1
 	if s.sc == nil {
-		fmt.Println("Root()")
 		// set up the state commit store
 		s.sc = NewDefaultSMT(NewTxn(s.ss.reader.(BadgerTxnReader), s.writer, []byte(stateCommitIDPrefix), false, false, nextVersion, false))
 		// commit the SMT directly using the cache ops
-		if err = s.sc.CommitParallel(s.ss.cache.ops); err != nil {
+		if err = s.sc.CommitParallel(s.ss.cache.ops, caller); err != nil {
 			return nil, err
 		}
 	}

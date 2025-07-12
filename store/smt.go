@@ -99,6 +99,7 @@ type SMT struct {
 	// OpData: data for each operation
 	OpData
 	opsLog []string
+	caller string
 	// define reserved keys
 	minKey *key
 	maxKey *key
@@ -269,7 +270,7 @@ func (s *SMT) Commit() (err lib.ErrorI) {
 }
 
 // CommitParallel(): sorts the operations in 8 subtree threads, executes those threads in parallel and combines them into the master tree
-func (s *SMT) CommitParallel(unsortedOps map[uint64]valueOp) (err lib.ErrorI) {
+func (s *SMT) CommitParallel(unsortedOps map[uint64]valueOp, caller string) (err lib.ErrorI) {
 	// add 16 synthetic borders to the tree
 	cleanup, err := s.addSyntheticBorders()
 	// collect the roots for each group (000, 001, 010, 011...)
@@ -297,6 +298,7 @@ func (s *SMT) CommitParallel(unsortedOps map[uint64]valueOp) (err lib.ErrorI) {
 			operations:   groupedByPrefix[i],
 			minKey:       s.minKey.copy(),
 			maxKey:       s.maxKey.copy(),
+			caller:       caller,
 		}
 		wg.Add(1)
 		go func(smt *SMT) {
@@ -1108,6 +1110,7 @@ func (x *node) replaceChild(oldKey, newKey []byte, smt *SMT) {
 		x.RightChildKey = bytes.Clone(newKey)
 		return
 	}
+	fmt.Println(smt.caller)
 	fmt.Println(len(smt.operations))
 	j, _ := lib.MarshalJSONIndentString(smt.root)
 	fmt.Println(j)

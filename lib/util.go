@@ -768,6 +768,21 @@ func PrintStackTrace() {
 	}
 }
 
+func GetStackTrace() (s string) {
+	pc := make([]uintptr, 10) // Get at most 10 stack frames
+	n := runtime.Callers(2, pc)
+	frames := runtime.CallersFrames(pc[:n])
+	s = ""
+	for {
+		frame, more := frames.Next()
+		s += fmt.Sprintf("%s\n\t%s:%d\n", frame.Function, frame.File, frame.Line)
+		if !more {
+			break
+		}
+	}
+	return
+}
+
 // Append() is a 'safe append' when the caller wants to re-use the 'a' slice
 func Append(a, b []byte) []byte {
 	out := make([]byte, len(a)+len(b))

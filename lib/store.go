@@ -13,7 +13,7 @@ type StoreI interface {
 	ProveStoreI                                  // proving membership / non-membership
 	RWIndexerI                                   // reading and writing indexer
 	NewTxn() StoreI                              // wrap the store in a discardable nested store
-	Root() ([]byte, ErrorI)                      // get the merkle root from the store
+	Root(caller string) ([]byte, ErrorI)         // get the merkle root from the store
 	DB() *badger.DB                              // retrieve the underlying badger db
 	Version() uint64                             // access the height of the store
 	Copy() (StoreI, ErrorI)                      // make a clone of the store

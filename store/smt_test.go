@@ -56,7 +56,7 @@ func TestFuzzMultiSet(t *testing.T) {
 		require.NoError(t, smt2.Commit())
 	}
 	// commit smt 1
-	require.NoError(t, smt1.CommitParallel(unsortedOps))
+	require.NoError(t, smt1.CommitParallel(unsortedOps), "")
 	// compare roots between the two smts
 	require.Equal(t, smt1.Root(), smt2.Root())
 }

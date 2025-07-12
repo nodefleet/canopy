@@ -331,8 +331,10 @@ func (c *Controller) CommitCertificate(qc *lib.QuorumCertificate, block *lib.Blo
 		}
 		// set up the mempool for the next height with the temporary FSM
 		c.Mempool.FSM = newFSM
+		c.log.Info("CheckMempool ApplyBlock")
 		// check the mempool to cache a proposal block and validate the mempool itself
 		c.Mempool.CheckMempool()
+		c.log.Info("CheckMempool ApplyBlock done")
 		// discard the temporary store after checking the mempool
 		memPoolStore.Discard()
 		// exit

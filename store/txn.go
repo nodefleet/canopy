@@ -9,8 +9,6 @@ import (
 	"github.com/canopy-network/canopy/lib"
 	"github.com/dgraph-io/badger/v4"
 
-	"maps"
-
 	"github.com/google/btree"
 )
 
@@ -79,7 +77,9 @@ func (t *txn) copy() *txn {
 	t.l.Lock()
 	defer t.l.Unlock()
 	ops := make(map[uint64]valueOp, t.sortedLen)
-	maps.Copy(ops, t.ops)
+	for k, o := range t.ops {
+		ops[k] = o.copy()
+	}
 	return &txn{
 		ops:       ops,
 		sorted:    t.sorted.Clone(),
@@ -103,6 +103,16 @@ type valueOp struct {
 	value []byte        // value of key value pair
 	entry *badger.Entry // value of key value pair in case of a custom entry
 	op    op            // is operation delete
+}
+
+func (o valueOp) copy() valueOp {
+	k, v := bytes.Clone(o.key), bytes.Clone(o.value)
+	return valueOp{
+		key:   k,
+		value: v,
+		entry: newEntry(k, v, getMeta(o.entry)),
+		op:    o.op,
+	}
 }
 
 // NewBadgerTxn() creates a new instance of Txn from badger Txn and WriteBatch correspondingly
