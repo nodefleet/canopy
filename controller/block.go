@@ -301,31 +301,33 @@ func (c *Controller) CommitCertificate(qc *lib.QuorumCertificate, block *lib.Blo
 		// exit with error
 		return err
 	}
-	// set up the mempool with the actual new FSM for the next height
-	// this makes c.Mempool.FSM.Reset() is unnecessary
-	if c.Mempool.FSM, err = c.FSM.Copy(); err != nil {
-		// exit with error
-		return err
-	}
-	// check the mempool to cache a proposal block and validate the mempool itself
-	c.Mempool.CheckMempool()
-	// reset mempool FSM
-	c.Mempool.FSM.Reset()
-	// update telemetry (using proper defer to ensure time.Since is evaluated at defer execution)
-	defer c.UpdateTelemetry(qc, block, time.Since(start))
-	// publish the root chain info to the nested chain subscribers
-	for _, id := range c.RCManager.ChainIds() {
-		// get the root chain info
-		info, e := c.FSM.LoadRootChainInfo(id, 0)
-		if e != nil {
-			// don't log 'no-validators' error as this is possible
-			if e.Error() != lib.ErrNoValidators().Error() {
-				c.log.Error(e.Error())
-			}
-			continue
+	if !c.Syncing().Load() {
+		// set up the mempool with the actual new FSM for the next height
+		// this makes c.Mempool.FSM.Reset() is unnecessary
+		if c.Mempool.FSM, err = c.FSM.Copy(); err != nil {
+			// exit with error
+			return err
 		}
-		// publish root chain information
-		go c.RCManager.Publish(id, info)
+		// check the mempool to cache a proposal block and validate the mempool itself
+		c.Mempool.CheckMempool()
+		// reset mempool FSM
+		c.Mempool.FSM.Reset()
+		// update telemetry (using proper defer to ensure time.Since is evaluated at defer execution)
+		defer c.UpdateTelemetry(qc, block, time.Since(start))
+		// publish the root chain info to the nested chain subscribers
+		for _, id := range c.RCManager.ChainIds() {
+			// get the root chain info
+			info, e := c.FSM.LoadRootChainInfo(id, 0)
+			if e != nil {
+				// don't log 'no-validators' error as this is possible
+				if e.Error() != lib.ErrNoValidators().Error() {
+					c.log.Error(e.Error())
+				}
+				continue
+			}
+			// publish root chain information
+			go c.RCManager.Publish(id, info)
+		}
 	}
 	// exit
 	return
