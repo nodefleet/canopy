@@ -3,7 +3,11 @@ package controller
 import (
 	"bytes"
 	"context"
+	"log"
 	"math/rand"
+	"os"
+	"path/filepath"
+	"runtime/pprof"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -503,6 +507,21 @@ func (c *Controller) ApplyAndValidateBlock(block *lib.Block, commit bool) (b *li
 
 // HandlePeerBlock() validates and handles an inbound certificate (with a block) from a remote peer
 func (c *Controller) HandlePeerBlock(msg *lib.BlockMessage, syncing bool) (*lib.QuorumCertificate, lib.ErrorI) {
+	// Create the CPU profile output file
+	if c.ChainHeight()%10 == 0 {
+		datadirectory := c.Config.DataDirPath
+		f, err := os.Create(filepath.Join(datadirectory, "cpu.prof"))
+		if err != nil {
+			log.Fatal("could not create CPU profile: ", err)
+		}
+		defer f.Close()
+
+		// Start CPU profiling
+		if err := pprof.StartCPUProfile(f); err != nil {
+			log.Fatal("could not start CPU profile: ", err)
+		}
+		defer pprof.StopCPUProfile() // Stop profiling when the program ends
+	}
 	// log the start of 'peer block handling'
 	c.log.Info("Handling peer block")
 	// define a convenience variable for the certificate
