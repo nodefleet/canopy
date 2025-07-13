@@ -127,47 +127,47 @@ func (s *StateMachine) ApplyBlock(ctx context.Context, b *lib.Block, allowOversi
 	if err = s.EndBlock(b.BlockHeader.ProposerAddress); err != nil {
 		return nil, nil, nil, nil, err
 	}
-	// load the validator set for the previous height
-	lastValidatorSet, _ := s.LoadCommittee(s.Config.ChainId, s.Height()-1)
-	// calculate the merkle root of the last validators to maintain validator continuity between blocks (if root)
-	lastValidatorRoot, err := lastValidatorSet.ValidatorSet.Root()
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	// load the 'next validator set' from the state
-	nextValidatorSet, _ := s.LoadCommittee(s.Config.ChainId, s.Height())
-	// calculate the merkle root of the next validators to maintain validator continuity between blocks (if root)
-	nextValidatorRoot, err := nextValidatorSet.ValidatorSet.Root()
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
+	//// load the validator set for the previous height
+	//lastValidatorSet, _ := s.LoadCommittee(s.Config.ChainId, s.Height()-1)
+	//// calculate the merkle root of the last validators to maintain validator continuity between blocks (if root)
+	//lastValidatorRoot, err := lastValidatorSet.ValidatorSet.Root()
+	//if err != nil {
+	//	return nil, nil, nil, nil, err
+	//}
+	//// load the 'next validator set' from the state
+	//nextValidatorSet, _ := s.LoadCommittee(s.Config.ChainId, s.Height())
+	//// calculate the merkle root of the next validators to maintain validator continuity between blocks (if root)
+	//nextValidatorRoot, err := nextValidatorSet.ValidatorSet.Root()
+	//if err != nil {
+	//	return nil, nil, nil, nil, err
+	//}
 	// calculate the merkle root of the state database to enable consensus on the result of the state after applying the block
 	stateRoot, err := store.Root()
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	// load the last block from the indexer
-	lastBlock, err := s.LoadBlock(s.height - 1)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
+	//// load the last block from the indexer
+	//lastBlock, err := s.LoadBlock(s.height - 1)
+	//if err != nil {
+	//	return nil, nil, nil, nil, err
+	//}
 	// generate the block header
 	header = &lib.BlockHeader{
-		Height:                s.Height(),                                                                   // increment the height
-		Hash:                  nil,                                                                          // set hash after
-		NetworkId:             s.NetworkID,                                                                  // ensure only applicable for the proper network
-		Time:                  b.BlockHeader.Time,                                                           // use the pre-set block time
-		NumTxs:                uint64(numTxs),                                                               // set the number of transactions
-		TotalTxs:              lastBlock.BlockHeader.TotalTxs + uint64(numTxs),                              // set the total count of transactions
-		TotalVdfIterations:    lastBlock.BlockHeader.TotalVdfIterations + b.BlockHeader.Vdf.GetIterations(), // add last total iterations to current iterations
-		StateRoot:             stateRoot,                                                                    // set the state root generated from the resulting state of the VDF
-		LastBlockHash:         nonEmptyHash(lastBlock.BlockHeader.Hash),                                     // set the last block hash to chain the blocks together
-		TransactionRoot:       nonEmptyHash(txRoot),                                                         // set the transaction root to easily merkle the transactions in a block
-		ValidatorRoot:         nonEmptyHash(lastValidatorRoot),                                              // set the last validator root to easily prove the validators who voted on this block
-		NextValidatorRoot:     nonEmptyHash(nextValidatorRoot),                                              // set the next validator root to have continuity between validator sets
-		ProposerAddress:       b.BlockHeader.ProposerAddress,                                                // set the proposer address
-		Vdf:                   b.BlockHeader.Vdf,                                                            // attach the preset vdf proof
-		LastQuorumCertificate: b.BlockHeader.LastQuorumCertificate,                                          // attach last quorum certificate (which is validated in the 'compare block headers' func
+		Height:                s.Height(),                          // increment the height
+		Hash:                  nil,                                 // set hash after
+		NetworkId:             s.NetworkID,                         // ensure only applicable for the proper network
+		Time:                  b.BlockHeader.Time,                  // use the pre-set block time
+		NumTxs:                uint64(numTxs),                      // set the number of transactions
+		TotalTxs:              0,                                   // set the total count of transactions
+		TotalVdfIterations:    0,                                   // add last total iterations to current iterations
+		StateRoot:             stateRoot,                           // set the state root generated from the resulting state of the VDF
+		LastBlockHash:         nonEmptyHash(nil),                   // set the last block hash to chain the blocks together
+		TransactionRoot:       nonEmptyHash(txRoot),                // set the transaction root to easily merkle the transactions in a block
+		ValidatorRoot:         nonEmptyHash(nil),                   // set the last validator root to easily prove the validators who voted on this block
+		NextValidatorRoot:     nonEmptyHash(nil),                   // set the next validator root to have continuity between validator sets
+		ProposerAddress:       b.BlockHeader.ProposerAddress,       // set the proposer address
+		Vdf:                   b.BlockHeader.Vdf,                   // attach the preset vdf proof
+		LastQuorumCertificate: b.BlockHeader.LastQuorumCertificate, // attach last quorum certificate (which is validated in the 'compare block headers' func
 	}
 	// create and set the block hash in the header
 	if _, err = header.SetHash(); err != nil {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"log"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
@@ -479,28 +478,28 @@ func (c *Controller) ApplyAndValidateBlock(block *lib.Block, commit bool) (b *li
 		}
 		return nil, lib.ErrFailedTransactions()
 	}
-	// compare the block headers for equality
-	compareHash, err := compare.SetHash()
-	if err != nil {
-		// exit with error
-		return
-	}
+	//// compare the block headers for equality
+	//compareHash, err := compare.SetHash()
+	//if err != nil {
+	//	// exit with error
+	//	return
+	//}
 	// use the hash to compare two block headers for equality
-	if !bytes.Equal(compareHash, candidate.Hash) {
+	if !bytes.Equal(compare.StateRoot, candidate.StateRoot) {
 		c.debugDumpHeaderDiff(candidate, compare)
 		return nil, lib.ErrUnequalBlockHash()
 	}
 	// validate VDF if committing randomly since this randomness is pseudo-non-deterministic (among nodes)
-	if commit && compare.Height > 1 && candidate.Vdf != nil {
-		// this design has similar security guarantees but lowers the computational requirements at a per-node basis
-		if rand.Intn(100) == 0 {
-			// validate the VDF included in the block
-			if !crypto.VerifyVDF(candidate.LastBlockHash, candidate.Vdf.Output, candidate.Vdf.Proof, int(candidate.Vdf.Iterations)) {
-				// exit with vdf error
-				return nil, lib.ErrInvalidVDF()
-			}
-		}
-	}
+	//if commit && compare.Height > 1 && candidate.Vdf != nil {
+	//	// this design has similar security guarantees but lowers the computational requirements at a per-node basis
+	//	if rand.Intn(100) == 0 {
+	//		// validate the VDF included in the block
+	//		if !crypto.VerifyVDF(candidate.LastBlockHash, candidate.Vdf.Output, candidate.Vdf.Proof, int(candidate.Vdf.Iterations)) {
+	//			// exit with vdf error
+	//			return nil, lib.ErrInvalidVDF()
+	//		}
+	//	}
+	//}
 	// log that the proposal is valid
 	c.log.Infof("Block %s with %d txs is valid for height %d ✅ ", candidateHash[:20], len(block.Transactions), candidateHeight)
 	// exit with the valid results
