@@ -18,12 +18,11 @@ import (
 )
 
 const (
-	MaxFailedDialAttempts        = 5               // maximum times a peer may fail a churn management dial attempt before evicted from the peer book
-	MaxPeersExchanged            = 5               // maximum number of peers per chain that may be sent/received during a peer exchange
+	MaxFailedDialAttempts        = 1               // maximum times a peer may fail a churn management dial attempt before evicted from the peer book
+	MaxPeersExchanged            = 1               // maximum number of peers per chain that may be sent/received during a peer exchange
 	MaxPeerBookRequestsPerWindow = 2               // maximum peer book request per window
 	PeerBookRequestWindowS       = 30              // seconds in a peer book request
-	PeerBookRequestTimeoutS      = 5               // timeout in seconds of the peer book
-	CrawlAndCleanBookFrequency   = time.Hour       // how often the book is cleaned and crawled
+	CrawlAndCleanBookFrequency   = time.Minute * 2 // how often the book is cleaned and crawled
 	SaveBookFrequency            = time.Minute * 5 // how often the book is saved to a file
 )
 
@@ -111,8 +110,8 @@ func (p *P2P) ListenForPeerBookResponses() {
 			}
 			// if they sent too many peers
 			if len(peerBookResponseMsg.Book) > MaxPeersExchanged {
-				p.log.Warnf("Too many peers sent from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
-				p.ChangeReputation(senderID, ExceedMaxPBLenRep)
+				//p.log.Warnf("Too many peers sent from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey)) TODO add back
+				//p.ChangeReputation(senderID, ExceedMaxPBLenRep)
 				continue
 			}
 			// add each peer to the book (deduplicated upon adding)
