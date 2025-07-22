@@ -83,62 +83,66 @@ func (p *P2P) SendPeerBookRequests() {
 func (p *P2P) ListenForPeerBookResponses() {
 	// limit the number of inbound PeerBook requests per requester and by total number of requests
 	l := lib.NewLimiter(MaxPeerBookRequestsPerWindow, p.MaxPossiblePeers()*MaxPeerBookRequestsPerWindow, PeerBookRequestWindowS)
-	for {
-		select {
-		// fires when received the response to the request
-		case msg := <-p.Inbox(lib.Topic_PEERS_RESPONSE):
-			//p.log.Debugf("Received peer book response from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
-			senderID := msg.Sender.Address.PublicKey
-			// rate limit per requester
-			blocked, totalBlock := l.NewRequest(lib.BytesToString(senderID))
-			// if requester blocked
-			if blocked {
-				p.ChangeReputation(senderID, ExceedMaxPBReqRep)
-				continue
-			}
-			// if blocked by total number of requests
-			if totalBlock {
-				continue // dos defensive
-			}
-			// ensure PeerBookResponse message type
-			peerBookResponseMsg := new(PeerBookResponseMessage)
-			if err := lib.Unmarshal(msg.Message, peerBookResponseMsg); err != nil {
-				p.log.Warnf("Invalid peer book response from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
-				p.ChangeReputation(senderID, InvalidMsgRep)
-				continue
-			}
-			// if they sent too many peers
-			if len(peerBookResponseMsg.Book) > MaxPeersExchanged {
-				//p.log.Warnf("Too many peers sent from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey)) TODO add back
-				//p.ChangeReputation(senderID, ExceedMaxPBLenRep)
-				continue
-			}
-			// add each peer to the book (deduplicated upon adding)
-			for _, bp := range peerBookResponseMsg.Book {
-				// skip empty
-				if bp == nil || bp.Address == nil || bp.Address.PeerMeta == nil {
-					continue
-				}
-				// skip max dial failed
-				if bp.ConsecutiveFailedDial >= MaxFailedDialAttempts {
-					continue
-				}
-				// skip if already connected
-				if p.Has(bp.Address.PublicKey) {
-					continue
-				}
-				// try to dial
-				if err := p.DialAndDisconnect(bp.Address, true); err != nil {
-					p.log.Debugf("DialAndDisconnect failed with err: %s", err.Error())
-					continue
-				}
-				// add peer to list
-				p.book.Add(bp)
-			}
-			p.ChangeReputation(senderID, GoodPeerBookRespRep)
-		case <-l.TimeToReset(): // fires when the limiter should reset
+	// routine to handle the reset of the limiter
+	go func(l *lib.SimpleLimiter) {
+		now := time.Now()
+		for range l.TimeToReset() { // fires when the limiter should reset
+			p.log.Debugf("resetting peer book response limiter, time since last reset: %s", time.Since(now))
 			l.Reset()
+			now = time.Now()
 		}
+	}(l)
+	for msg := range p.Inbox(lib.Topic_PEERS_RESPONSE) {
+		p.log.Debugf("Received peer book response from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
+		senderID := msg.Sender.Address.PublicKey
+		// rate limit per requester
+		blocked, totalBlock := l.NewRequest(lib.BytesToString(senderID))
+		// if requester blocked
+		if blocked {
+			p.log.Warnf("too many peer book responses from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
+			p.ChangeReputation(senderID, ExceedMaxPBReqRep)
+			continue
+		}
+		// if blocked by total number of requests
+		if totalBlock {
+			continue // dos defensive
+		}
+		// ensure PeerBookResponse message type
+		peerBookResponseMsg := new(PeerBookResponseMessage)
+		if err := lib.Unmarshal(msg.Message, peerBookResponseMsg); err != nil {
+			p.log.Warnf("Invalid peer book response from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
+			p.ChangeReputation(senderID, InvalidMsgRep)
+			continue
+		}
+		// if they sent too many peers
+		if len(peerBookResponseMsg.Book) > MaxPeersExchanged {
+			//p.log.Warnf("Too many peers sent from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey)) TODO add back
+			//p.ChangeReputation(senderID, ExceedMaxPBLenRep)
+			continue
+		}
+		// add each peer to the book (deduplicated upon adding)
+		for _, bp := range peerBookResponseMsg.Book {
+			// skip empty
+			if bp == nil || bp.Address == nil || bp.Address.PeerMeta == nil {
+				continue
+			}
+			// skip max dial failed
+			if bp.ConsecutiveFailedDial >= MaxFailedDialAttempts {
+				continue
+			}
+			// skip if already connected
+			if p.Has(bp.Address.PublicKey) {
+				continue
+			}
+			// try to dial
+			if err := p.DialAndDisconnect(bp.Address, true); err != nil {
+				p.log.Debugf("DialAndDisconnect failed with err: %s", err.Error())
+				continue
+			}
+			// add peer to list
+			p.book.Add(bp)
+		}
+		p.ChangeReputation(senderID, GoodPeerBookRespRep)
 	}
 }
 
@@ -146,49 +150,50 @@ func (p *P2P) ListenForPeerBookResponses() {
 func (p *P2P) ListenForPeerBookRequests() {
 	// limit the number of inbound PeerBook requests per requester and by total number of requests
 	l := lib.NewLimiter(MaxPeerBookRequestsPerWindow, p.MaxPossiblePeers()*MaxPeerBookRequestsPerWindow, PeerBookRequestWindowS)
-	for {
-		select {
-		// fires after receiving a peer request
-		case msg := <-p.Inbox(lib.Topic_PEERS_REQUEST):
-			p.log.Debugf("Received peer book request from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
-			requesterID := msg.Sender.Address.PublicKey
-			// rate limit per requester
-			blocked, totalBlock := l.NewRequest(lib.BytesToString(requesterID))
-			// if requester blocked
-			if blocked {
-				p.ChangeReputation(requesterID, ExceedMaxPBReqRep)
-				continue
-			}
-			// if blocked by total number of requests
-			if totalBlock {
-				continue // dos defensive
-			}
-			// only should be PeerBookMessage in this channel
-			if err := lib.Unmarshal(msg.Message, new(PeerBookRequestMessage)); err != nil {
-				p.log.Warnf("Received invalid peer book request from %s", lib.BytesToString(msg.Sender.Address.PublicKey))
-				p.ChangeReputation(requesterID, InvalidMsgRep)
-				continue
-			}
-			var response []*BookPeer
-			// grab up to MaxPeerExchangePerChain number of peers for that specific chain
-			for i := 0; i <= MaxPeersExchanged; i++ {
-				toBeAdded := p.book.GetRandom()
-				if toBeAdded == nil {
-					break
-				}
-				if !slices.ContainsFunc(response, func(p *BookPeer) bool { // ensure no duplicates
-					return bytes.Equal(p.Address.PublicKey, toBeAdded.Address.PublicKey)
-				}) {
-					response = append(response, toBeAdded) // add BookPeer to response
-				}
-			}
-			// send response to the requester
-			err := p.SendTo(requesterID, lib.Topic_PEERS_RESPONSE, &PeerBookResponseMessage{Book: response})
-			if err != nil {
-				p.log.Error(err.Error()) // log error
-			}
-		case <-l.TimeToReset(): // fires when the limiter should reset
+	// routine to handle the reset of the limiter
+	go func(l *lib.SimpleLimiter) {
+		for range l.TimeToReset() { // fires when the limiter should reset
 			l.Reset()
+		}
+	}(l)
+	for msg := range p.Inbox(lib.Topic_PEERS_REQUEST) {
+		p.log.Debugf("Received peer book request from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
+		requesterID := msg.Sender.Address.PublicKey
+		// rate limit per requester
+		blocked, totalBlock := l.NewRequest(lib.BytesToString(requesterID))
+		// if requester blocked
+		if blocked {
+			p.log.Warnf("too many peer book requests from %s", lib.BytesToTruncatedString(msg.Sender.Address.PublicKey))
+			p.ChangeReputation(requesterID, ExceedMaxPBReqRep)
+			continue
+		}
+		// if blocked by total number of requests
+		if totalBlock {
+			continue // dos defensive
+		}
+		// only should be PeerBookMessage in this channel
+		if err := lib.Unmarshal(msg.Message, new(PeerBookRequestMessage)); err != nil {
+			p.log.Warnf("Received invalid peer book request from %s", lib.BytesToString(msg.Sender.Address.PublicKey))
+			p.ChangeReputation(requesterID, InvalidMsgRep)
+			continue
+		}
+		var response []*BookPeer
+		// grab up to MaxPeerExchangePerChain number of peers for that specific chain
+		for i := 0; i <= MaxPeersExchanged; i++ {
+			toBeAdded := p.book.GetRandom()
+			if toBeAdded == nil {
+				break
+			}
+			if !slices.ContainsFunc(response, func(p *BookPeer) bool { // ensure no duplicates
+				return bytes.Equal(p.Address.PublicKey, toBeAdded.Address.PublicKey)
+			}) {
+				response = append(response, toBeAdded) // add BookPeer to response
+			}
+		}
+		// send response to the requester
+		err := p.SendTo(requesterID, lib.Topic_PEERS_RESPONSE, &PeerBookResponseMessage{Book: response})
+		if err != nil {
+			p.log.Error(err.Error()) // log error
 		}
 	}
 }
