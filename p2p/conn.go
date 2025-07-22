@@ -77,14 +77,14 @@ type MultiConn struct {
 
 // NewConnection() creates and starts a new instance of a MultiConn
 func (p *P2P) NewConnection(conn net.Conn) (*MultiConn, lib.ErrorI) {
-	//if tcpConn, ok := conn.(*net.TCPConn); ok {
-	//	if err := tcpConn.SetWriteBuffer(32 * 1024 * 1024); err != nil {
-	//		p.log.Warnf("Failed to set write buffer: %v", err)
-	//	}
-	//	if err := tcpConn.SetReadBuffer(32 * 1024 * 1024); err != nil {
-	//		p.log.Warnf("Failed to set write buffer: %v", err)
-	//	}
-	//}
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		if err := tcpConn.SetWriteBuffer(32 * 1024 * 1024); err != nil {
+			p.log.Warnf("Failed to set write buffer: %v", err)
+		}
+		if err := tcpConn.SetReadBuffer(32 * 1024 * 1024); err != nil {
+			p.log.Warnf("Failed to set write buffer: %v", err)
+		}
+	}
 	// establish an encrypted connection using the handshake
 	eConn, err := NewHandshake(conn, p.meta, p.privateKey)
 	if err != nil {
@@ -267,7 +267,7 @@ func (c *MultiConn) waitForAndHandleWireBytes(m *limiter.Monitor) (proto.Message
 	// restrict the instantaneous data flow to rate bytes per second
 	// Limit() request maxPacketSize bytes from the limiter and the limiter
 	// will block the execution until at or below the desired rate of flow
-	m.Limit(int(maxPacketSize), int64(dataFlowRatePerS), true)
+	//m.Limit(int(maxPacketSize), int64(dataFlowRatePerS), true)
 	// read the proto message from the wire
 	if err := receiveProtoMsg(c.conn, msg); err != nil {
 		return nil, err
