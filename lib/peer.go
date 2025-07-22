@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/list"
 	"encoding/json"
+	"fmt"
 	"net"
 	"slices"
 	"strings"
@@ -274,6 +275,13 @@ func (c *MessageCache) Add(msg *MessageAndMetadata) (ok bool) {
 	return true
 }
 
+func (c *MessageCache) Contains(msg *MessageAndMetadata) bool {
+	// create a key for the message
+	key := crypto.HashString(msg.Message)
+	// test for contain and return
+	return c.deDupe.Contains(key)
+}
+
 // MESSAGE LIMITERS BELOW
 
 // SimpleLimiter ensures the number of requests don't exceed
@@ -362,4 +370,59 @@ func (x *PeerMeta) Equals(y *PeerMeta) bool {
 		return false
 	}
 	return true
+}
+
+type HeightTracker struct {
+	// peers that have sent a height higher than this FSM
+	newHeightPeers map[string]struct{}
+	// cache to prevent handling the same blocks from the same senders
+	blockSenders map[string]struct{}
+	// block hashes that have been received
+	receivedBlocks map[string]struct{}
+}
+
+func NewHeightTracker() *HeightTracker {
+	return &HeightTracker{
+		newHeightPeers: make(map[string]struct{}),
+		receivedBlocks: make(map[string]struct{}),
+		blockSenders:   make(map[string]struct{}),
+	}
+}
+
+// HaveSeen returns whether the tracker has seen this block before
+func (t *HeightTracker) HaveSeen(blockHash string) bool {
+	_, received := t.receivedBlocks[blockHash]
+	return received
+}
+
+// HaveSeenFromSender returns whether a block from a sender has already been seen
+func (t *HeightTracker) HaveSeenFromSender(sender, blockHash string) bool {
+	key := fmt.Sprintf("%s-%s", sender, blockHash)
+	_, found := t.blockSenders[key]
+	return found
+}
+
+// RecordNewHeight records that a sender has sent a block with a new height
+func (t *HeightTracker) RecordNewHeight(sender string) {
+	t.newHeightPeers[sender] = struct{}{}
+}
+
+// IsPassedSyncThreshold determines whether enough peers have send a block with a new height to warrant a sync
+func (t *HeightTracker) IsPassedSyncThreshold(peerCount int) bool {
+	threshold := float64(peerCount) / 3.0
+	return float64(len(t.newHeightPeers)) >= threshold
+}
+
+// RecordBlock records the sender and block information
+func (t *HeightTracker) RecordBlock(sender, blockHash string) {
+	key := fmt.Sprintf("%s-%s", sender, blockHash)
+	t.blockSenders[key] = struct{}{}
+	t.receivedBlocks[blockHash] = struct{}{}
+}
+
+// Reset resets the state of the height tracker, called after every new block height
+func (t *HeightTracker) Reset() {
+	t.newHeightPeers = make(map[string]struct{})
+	t.receivedBlocks = make(map[string]struct{})
+	t.blockSenders = make(map[string]struct{})
 }

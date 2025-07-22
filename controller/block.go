@@ -21,8 +21,10 @@ import (
 func (c *Controller) ListenForBlock() {
 	// log the beginning of the 'block listener' service
 	c.log.Debug("Listening for inbound blocks")
-	// initialize a cache that prevents duplicate messages and  create a map of peers that signal 'new block'
-	cache, newBlockPeers := lib.NewMessageCache(), make(map[string]struct{})
+	// cache to prevent processing blocks that already failed handling (new height errors excluded)
+	invalidCache := lib.NewMessageCache()
+	// sync detector to detect when this node is out of sync based on received new heights
+	heightTracker := lib.NewHeightTracker()
 	// wait and execute for each inbound message received
 	for msg := range c.P2P.Inbox(Block) {
 		// create a variable to signal a 'stop loop'
@@ -33,16 +35,19 @@ func (c *Controller) ListenForBlock() {
 			c.Lock()
 			// when iteration completes, unlock
 			defer c.Unlock()
-			// check and add the message to the cache to prevent duplicates
-			if ok := cache.Add(msg); !ok {
-				// if duplicate, exit iteration
+			// log the receipt of the block message
+			c.log.Infof("Received block %s from %s ✉️",
+				lib.BytesToTruncatedString(msg.Message),
+				lib.BytesToTruncatedString(msg.Sender.Address.PublicKey),
+			)
+			// convenience variable for sender
+			sender := lib.BytesToString(msg.Sender.Address.PublicKey)
+			// check for message in the invalid cache
+			if invalidCache.Contains(msg) {
+				c.log.Debugf("Skipping invalid duplicate message")
+				// exit iteration
 				return
 			}
-			c.log.Debug("Handling block message")
-			// add a convenience variable to track the sender
-			sender := msg.Sender.Address.PublicKey
-			// log the receipt of the block message
-			c.log.Infof("Received new block from %s ✉️", lib.BytesToTruncatedString(sender))
 			// try to unmarshal the message to a block message
 			blockMessage := new(lib.BlockMessage)
 			if err := lib.Unmarshal(msg.Message, blockMessage); err != nil {
@@ -53,44 +58,88 @@ func (c *Controller) ListenForBlock() {
 				// exit iteration
 				return
 			}
+			block := new(lib.Block)
+			// unmarshal block
+			err := lib.Unmarshal(blockMessage.BlockAndCertificate.Block, block)
+			if err != nil {
+				// log the error
+				c.log.Debug("Invalid Peer Block")
+				// slash the peer's reputation
+				c.P2P.ChangeReputation(msg.Sender.Address.PublicKey, p2p.InvalidBlockRep)
+				// exit iteration
+				return
+			}
+			// convenience variable
+			blockHash := lib.BytesToString(block.BlockHeader.Hash)
+			// check if this lock from this sender has been seen
+			if heightTracker.HaveSeenFromSender(sender, blockHash) {
+				// this block already processed from this sender
+				// no further processing required
+				return
+			}
+			// incoming block has lower height, no further processing required
+			// after committing a block a node can still receive gossiped copies
+			if block.BlockHeader.Height < c.FSM.Height() {
+				return
+			}
+			// check if this block has been seen before and successfully handled
+			// if so this block can be used for new height checks
+			if heightTracker.HaveSeen(blockHash) {
+				// record this block reception for future sync checks
+				heightTracker.RecordBlock(sender, blockHash)
+				// incoming block is same height or older, no futher action required
+				if block.BlockHeader.Height <= c.FSM.Height() {
+					// exit iteration
+					return
+				}
+				// record this sender as having sent a block with a new height
+				heightTracker.RecordNewHeight(sender)
+				// new block has higher height, check if this node is considered out of sync
+				if !heightTracker.IsPassedSyncThreshold(c.P2P.PeerCount()) {
+					// exit iteration
+					return
+				}
+				// log the 'out of sync' message
+				c.log.Warnf("Node fell out of sync for chainId: %d", blockMessage.ChainId)
+				// revert to syncing mode
+				go c.Sync()
+				// signal exit the out loop
+				quit = true
+				// reset height tracker
+				heightTracker.Reset()
+				// exit iteration
+				return
+			}
 			// 'handle' the peer block and certificate appropriately
 			qc, err := c.HandlePeerBlock(blockMessage, false)
 			// ensure no error
 			if err != nil {
-				senderPublicKey := lib.BytesToString(sender)
-				// if new height notified add to the map
+				// handle errors other than new height
 				if err.Error() == lib.ErrNewHeight().Error() {
-					newBlockPeers[senderPublicKey] = struct{}{}
+					// record this new height error
+					heightTracker.RecordNewHeight(sender)
+					// record this block reception for future sync check
+					heightTracker.RecordBlock(sender, blockHash)
+				} else {
+					// log the error
+					c.log.Warnf("Peer block invalid:\n%s", err.Error())
+					// slash the peer's reputation
+					c.P2P.ChangeReputation(msg.Sender.Address.PublicKey, p2p.InvalidBlockRep)
+					// add message to invalid message cache
+					invalidCache.Add(msg)
 				}
-				// check if the node has fallen out of sync if at least a third of its peers has notified it
-				if float64(len(newBlockPeers)) >= float64(c.P2P.PeerCount())/float64(3) {
-					// reset map since syncing will start
-					newBlockPeers = make(map[string]struct{})
-					// log the 'out of sync' message
-					c.log.Warnf("Node fell out of sync for chainId: %d", blockMessage.ChainId)
-					// revert to syncing mode
-					go c.Sync()
-					// signal exit the out loop
-					quit = true
-					// exit iteration
-					return
-				}
-				// log the error
-				c.log.Warnf("Peer block invalid:\n%s", err.Error())
-				// slash the peer's reputation
-				c.P2P.ChangeReputation(msg.Sender.Address.PublicKey, p2p.InvalidBlockRep)
 				// exit iteration
 				return
 			}
 			// if not syncing - gossip the block
 			if !c.Syncing().Load() {
 				// gossip the block to our peers
-				c.GossipBlock(qc, sender, blockMessage.Time)
+				c.GossipBlock(qc, msg.Sender.Address.PublicKey, blockMessage.Time)
 				// signal a reset to the bft module
 				c.Consensus.ResetBFT <- bft.ResetBFT{StartTime: time.UnixMicro(int64(blockMessage.Time))}
 			}
-			// reset 'newBlockPeers' because a new block was received properly
-			newBlockPeers = make(map[string]struct{})
+			// reset height tracker because new block was committed succesfully
+			heightTracker.Reset()
 		}()
 		// if quit signaled
 		if quit {
@@ -105,7 +154,7 @@ func (c *Controller) ListenForBlock() {
 // GossipBlockMsg() gossips a certificate (with block) through the P2P network for a specific chainId
 func (c *Controller) GossipBlock(certificate *lib.QuorumCertificate, senderPubToExclude []byte, timestamp uint64) {
 	// log the start of the gossip block function
-	c.log.Debugf("Gossiping certificate: %s", lib.BytesToString(certificate.ResultsHash))
+	c.log.Debugf("Gossiping certificate: %s", lib.BytesToString(certificate.ResultsHash), certificate.Header.Height)
 	// create the block message to gossip
 	blockMessage := &lib.BlockMessage{
 		ChainId:             c.Config.ChainId,

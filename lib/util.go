@@ -734,6 +734,12 @@ func (d *DeDuplicator[T]) Delete(k T) { delete(d.m, k) }
 // Map() returns the underlying map to the de-duplicator
 func (d *DeDuplicator[T]) Map() map[T]struct{} { return d.m }
 
+// Contains() tests whethey key k is contained in the de-duplicator map
+func (d *DeDuplicator[T]) Contains(k T) bool {
+	_, found := d.m[k]
+	return found
+}
+
 // TimeTrack() a utility function to benchmark the time of caller function
 func TimeTrack(l LoggerI, start time.Time) {
 	elapsed, functionName := time.Since(start), "unknown"
