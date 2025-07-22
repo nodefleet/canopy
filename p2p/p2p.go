@@ -319,6 +319,7 @@ func (p *P2P) DialWithBackoff(peerInfo *lib.PeerAddress, strictPublicKey bool) {
 
 // DialAndDisconnect() dials the peer but disconnects once a fully authenticated connection is established
 func (p *P2P) DialAndDisconnect(a *lib.PeerAddress, strictPublicKey bool) lib.ErrorI {
+	defer lib.TimeTrack(p.log, time.Now())
 	p.log.Debugf("DialAndDisconnect %s@%s", lib.BytesToString(a.PublicKey), a.NetAddress)
 	return p.Dial(a, true, strictPublicKey)
 }
