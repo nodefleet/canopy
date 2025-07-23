@@ -49,6 +49,7 @@ type aeadState struct {
 
 // NewHandshake() executes the authentication protocol between two tcp connections to result in an encryption connection
 func NewHandshake(conn net.Conn, meta *lib.PeerMeta, privateKey crypto.PrivateKeyI) (encryptedConn *EncryptedConn, e lib.ErrorI) {
+	defer lib.TimeTrack(lib.NewDefaultLogger(), time.Now())
 	// create a temporary keypair to establish a shared secret
 	tempPrivateKey, _ := crypto.NewEd25519PrivateKey()
 	tempPublicKey := tempPrivateKey.PublicKey().Bytes()

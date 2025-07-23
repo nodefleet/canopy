@@ -77,6 +77,7 @@ type MultiConn struct {
 
 // NewConnection() creates and starts a new instance of a MultiConn
 func (p *P2P) NewConnection(conn net.Conn) (*MultiConn, lib.ErrorI) {
+	defer lib.TimeTrack(p.log, time.Now())
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		if err := tcpConn.SetWriteBuffer(32 * 1024 * 1024); err != nil {
 			p.log.Warnf("Failed to set write buffer: %v", err)
