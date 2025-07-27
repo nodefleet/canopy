@@ -1,6 +1,6 @@
 import React from "react";
 import { MDBCollapse } from "mdb-react-ui-kit";
-import { withTooltip } from "@/components/util";
+import { withTooltip } from "./util";
 
 const sidebarIcons = [
   { src: "./block.png", label: "Blocks" },

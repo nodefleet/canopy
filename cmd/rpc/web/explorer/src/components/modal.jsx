@@ -2,7 +2,7 @@ import React from "react";
 import Truncate from "react-truncate-inside";
 import { JsonViewer } from "@textea/json-viewer";
 import { Modal, Table, Tab, Tabs, CardGroup, Card, Toast, ToastContainer, Button } from "react-bootstrap";
-import * as API from "@/components/api";
+import * as API from "./api";
 import {
   copy,
   cpyObj,
@@ -13,7 +13,7 @@ import {
   withTooltip,
   convertTx,
   toCNPY,
-} from "@/components/util";
+} from "./util";
 
 // convertCardData() converts the data from state into a display object for rendering
 function convertCardData(state, v) {

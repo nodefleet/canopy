@@ -1,0 +1,12 @@
+@import "bootstrap/dist/css/bootstrap.min.css";
+@import "bootstrap-icons/font/bootstrap-icons.css";
+@import "../styles/globals.css";
+
+/* Additional font family enforcement */
+body {
+  font-family: var(--font-body) !important;
+}
+
+* {
+  font-family: inherit;
+}

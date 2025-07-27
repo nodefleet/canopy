@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useContext } from "react";
 import Truncate from "react-truncate-inside";
-import CanaJSON from "@/components/canaJSON";
+import CanaJSON from "./canaJSON";
 import { Bar } from "react-chartjs-2";
 import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from "chart.js";
 import { Accordion, Button, Carousel, Container, Form, InputGroup, Modal, Spinner, Table } from "react-bootstrap";
@@ -15,7 +15,7 @@ import {
   TxChangeParameter,
   TxDAOTransfer,
   VotePoll,
-} from "@/components/api";
+} from "./api";
 import {
   isValidJSON,
   copy,
@@ -27,10 +27,10 @@ import {
   toUCNPY,
   numberFromCommas,
   formatLocaleNumber,
-} from "@/components/util";
-import { KeystoreContext } from "@/pages";
-import FormInputs from "@/components/form_inputs";
-import { PollIcon, ProposalIcon } from "@/components/svg_icons";
+} from "./util";
+import { KeystoreContext } from "../App";
+import FormInputs from "./form_inputs";
+import { PollIcon, ProposalIcon } from "./svg_icons";
 
 function useKeystore() {
   const keystore = useContext(KeystoreContext);
@@ -421,7 +421,7 @@ function Header({ title, svg: SVGComponent }) {
   }
 
   return (
-    <div class="gov-header">
+    <div className="gov-header">
       <SVGComponent />
       <span id="propose-title">{title}</span>
       <span id="propose-subtitle"> on CANOPY</span>

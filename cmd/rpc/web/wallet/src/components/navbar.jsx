@@ -1,9 +1,9 @@
 import Container from "react-bootstrap/Container";
 import Navbar from "react-bootstrap/Navbar";
 import { Nav, NavDropdown } from "react-bootstrap";
-import { withTooltip } from "@/components/util";
-import DarkModeToggle from "@/components/color_mode";
-import { WalletLogoIcon, KeyIcon } from "@/components/svg_icons";
+import { withTooltip } from "./util";
+import DarkModeToggle from "./color_mode";
+import { WalletLogoIcon, KeyIcon } from "./svg_icons";
 
 const navbarIconsAndTip = [
   {

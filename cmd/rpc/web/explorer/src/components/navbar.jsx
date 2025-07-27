@@ -1,4 +1,4 @@
-import { convertIfNumber } from "@/components/util";
+import { convertIfNumber } from "./util";
 import { useState } from "react";
 import { Form } from "react-bootstrap";
 import Container from "react-bootstrap/Container";

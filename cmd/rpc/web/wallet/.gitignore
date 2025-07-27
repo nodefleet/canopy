@@ -8,9 +8,9 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
+# vite
+/dist
+/out
 
 # production
 /build
@@ -31,11 +31,7 @@ yarn-error.log*
 .docker/.env
 .docker/volumes
 
-# vercel
-.vercel
-
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 
 .idea

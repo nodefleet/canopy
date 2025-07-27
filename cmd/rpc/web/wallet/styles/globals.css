@@ -266,6 +266,63 @@ button {
   color: var(--bs-card-title-color);
 }
 
+/* Force DASHBOARD carousel dimensions only - don't affect governance */
+#dashboard-container .carousel {
+  width: 600px !important;
+  min-width: 600px !important;
+  max-width: 600px !important;
+  height: 200px !important;
+  contain: layout size !important;
+  overflow: hidden !important;
+  position: relative !important;
+  flex: none !important;
+}
+
+#dashboard-container .carousel .carousel-inner {
+  width: 600px !important;
+  height: 200px !important;
+}
+
+#dashboard-container .carousel .carousel-item {
+  width: 600px !important;
+  height: 200px !important;
+}
+
+#dashboard-container .carousel .carousel-item-detail {
+  width: 90% !important;
+  max-width: 500px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* Dashboard carousel cards only */
+#dashboard-container .carousel-item-container {
+  width: calc(600px - 2rem) !important;
+  height: calc(200px - 2rem) !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  border: 1px solid #dee2e6 !important;
+  border-radius: 0.375rem !important;
+  background: #fff !important;
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075) !important;
+  margin: 1rem !important;
+  padding: 0.5rem 3rem !important;
+}
+
+/* Dark mode support for dashboard carousel cards */
+[data-bs-theme="dark"] #dashboard-container .carousel-item-container {
+  background: #212529 !important;
+  border-color: #495057 !important;
+  color: #fff !important;
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.3) !important;
+}
+
+
 .account-summary-container {
   width: 60%;
   margin: 0 auto !important;

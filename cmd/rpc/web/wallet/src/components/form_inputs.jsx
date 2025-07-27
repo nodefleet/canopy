@@ -8,7 +8,7 @@ import {
   withTooltip,
   toUCNPY,
   formatLocaleNumber,
-} from "@/components/util";
+} from "./util";
 
 // FormInputs() is a component that renders form inputs based on the fields passed to it
 export default function FormInputs({ keygroup, account, validator, fields, show, onFieldChange }) {

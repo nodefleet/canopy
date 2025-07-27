@@ -1,11 +1,11 @@
 import { useEffect, useState, memo } from "react";
 import Truncate from "react-truncate-inside";
-import { getRatio, formatNumber } from "@/components/util";
+import { getRatio, formatNumber } from "./util";
 import Container from "react-bootstrap/Container";
 import { Button, Card, Carousel, Col, Row, Spinner } from "react-bootstrap";
 import { YAxis, Tooltip, Legend, AreaChart, Area } from "recharts";
-import CanaLog from "@/components/canalog";
-import { PauseIcon, UnpauseIcon } from "@/components/svg_icons";
+import CanaLog from "./canalog";
+import { PauseIcon, UnpauseIcon } from "./svg_icons";
 import {
   getAdminRPCURL,
   configPath,
@@ -17,7 +17,7 @@ import {
   PeerInfo,
   peerInfoPath,
   Resource,
-} from "@/components/api";
+} from "./api";
 
 // Memoized log controller button
 const RenderControlButton = memo(({ state, setState }) => {
@@ -143,23 +143,21 @@ export default function Dashboard() {
   function renderButtonCarouselItem(props) {
     return (
       <Carousel.Item>
-        <Card className="carousel-item-container">
-          <Card.Body>
-            <Card.Title>EXPLORE RAW JSON</Card.Title>
-            <div>
-              {props.map((item, index) => (
-                <Button
-                  key={index}
-                  className="carousel-btn"
-                  variant="outline-secondary"
-                  onClick={() => window.open(item.url, "_blank")}
-                >
-                  {item.title}
-                </Button>
-              ))}
-            </div>
-          </Card.Body>
-        </Card>
+        <div className="carousel-item-container">
+          <div className="carousel-item-title">EXPLORE RAW JSON</div>
+          <div>
+            {props.map((item, index) => (
+              <Button
+                key={index}
+                className="carousel-btn"
+                variant="outline-secondary"
+                onClick={() => window.open(item.url, "_blank")}
+              >
+                {item.title}
+              </Button>
+            ))}
+          </div>
+        </div>
       </Carousel.Item>
     );
   }
@@ -167,38 +165,34 @@ export default function Dashboard() {
   // return the dashboard rendering
   return (
     <div className="content-container" id="dashboard-container">
-      <Container id="dashboard-inner" fluid>
-        <Row>
-          {carouselItems.map((k, i) => (
-            <Col key={i}>
-              <Carousel slide={false} interval={null} className="carousel">
-                {k.slides.map((k, i) => (
-                  <Carousel.Item key={i}>
-                    <Card className="carousel-item-container">
-                      <Card.Body>
-                        <Card.Title className="carousel-item-title">
-                          <span>{k.title}</span>
-                        </Card.Title>
-                        <p id="carousel-item-detail-title" className="carousel-item-detail">
-                          {<Truncate text={k.dT} />}
-                        </p>
-                        <p className="carousel-item-detail">
-                          <Truncate text={k.d1} />
-                        </p>
-                        <p className="carousel-item-detail">
-                          <Truncate text={k.d2} />
-                        </p>
-                        <p>{k.d3}</p>
-                      </Card.Body>
-                    </Card>
-                  </Carousel.Item>
-                ))}
-                {renderButtonCarouselItem(k.btnSlides)}
-              </Carousel>
-            </Col>
-          ))}
-        </Row>
-      </Container>
+      <div style={{display: 'flex', justifyContent: 'space-around', width: '100%', padding: '1rem', gap: '1rem'}}>
+        {carouselItems.map((k, i) => (
+          <div key={i}>
+            <Carousel slide={false} interval={null} className="carousel">
+              {k.slides.map((k, i) => (
+                <Carousel.Item key={i}>
+                  <div className="carousel-item-container">
+                    <div className="carousel-item-title">
+                      <span>{k.title}</span>
+                    </div>
+                    <p id="carousel-item-detail-title" className="carousel-item-detail">
+                      {k.dT}
+                    </p>
+                    <p className="carousel-item-detail">
+                      {k.d1}
+                    </p>
+                    <p className="carousel-item-detail">
+                      {k.d2}
+                    </p>
+                    <p>{k.d3}</p>
+                  </div>
+                </Carousel.Item>
+              ))}
+              {renderButtonCarouselItem(k.btnSlides)}
+            </Carousel>
+          </div>
+        ))}
+      </div>
       <h2 className="dashboard-label">Performance</h2>
       <Container id="charts-container" fluid>
         {[

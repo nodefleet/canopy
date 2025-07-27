@@ -13,8 +13,8 @@ import {
   TxStake,
   TxUnpause,
   TxUnstake
-} from "@/components/api";
-import FormInputs from "@/components/form_inputs";
+} from "./api";
+import FormInputs from "./form_inputs";
 import {
   copy,
   downloadJSON,
@@ -28,8 +28,8 @@ import {
   toCNPY,
   toUCNPY,
   withTooltip
-} from "@/components/util";
-import { KeystoreContext } from "@/pages";
+} from "./util";
+import { KeystoreContext } from "../App";
 import {
   CloseIcon,
   CopyIcon,
@@ -43,12 +43,12 @@ import {
   SwapIcon,
   UnpauseIcon,
   UnstakeIcon
-} from "@/components/svg_icons";
+} from "./svg_icons";
 import { useContext, useEffect, useRef, useState } from "react";
 import { Button, Card, Col, Form, Modal, Row, Spinner, Table } from "react-bootstrap";
 import Alert from "react-bootstrap/Alert";
 import Truncate from "react-truncate-inside";
-import CanaJSON from "@/components/canaJSON";
+import CanaJSON from "./canaJSON";
 
 function Keystore() {
   const keystore = useContext(KeystoreContext);
@@ -670,7 +670,7 @@ function RenderAccountInfo({ v, i }, color) {
 function RenderTransactions({ account, state, setState }) {
   return account.combined.length === 0 ? null : (
     <div className="recent-transactions-table">
-      <span class="table-label">RECENT TRANSACTIONS</span>
+      <span className="table-label">RECENT TRANSACTIONS</span>
       <Table className="table-fixed" bordered hover style={{ marginTop: "10px" }}>
         <thead>
         <tr>

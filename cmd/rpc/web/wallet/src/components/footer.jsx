@@ -1,5 +1,5 @@
 import Container from "react-bootstrap/Container";
-import { DiscordIcon, TwitterIcon } from "@/components/svg_icons";
+import { DiscordIcon, TwitterIcon } from "./svg_icons";
 
 const socials = [
   {
@@ -14,7 +14,7 @@ const socials = [
 
 const Footer = () => {
   return (
-    <footer class="footer-light">
+    <footer className="footer-light">
       <Container>
         {/* Use map to render social icons dynamically */}
         {socials.map((social, index) => (

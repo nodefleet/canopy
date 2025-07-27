@@ -98,7 +98,7 @@ input::placeholder {
 }
 
 .main-input {
-  background-image: url("../public/search.png");
+  background-image: url("/search.png");
   background-repeat: no-repeat;
   background-position: left center;
   background-size: 25px;
@@ -110,7 +110,7 @@ input::placeholder {
   text-align: center;
   border-radius: 2px;
   border: none;
-  background-image: url("../public/filter.png");
+  background-image: url("/filter.png");
   background-repeat: no-repeat;
   background-position: right center;
   background-size: 25px;
@@ -129,7 +129,7 @@ input::placeholder {
   border-radius: 2px;
   width: 50px;
   border: none;
-  background-image: url("../public/chain.png");
+  background-image: url("/chain.png");
   background-repeat: no-repeat;
   background-position: right center;
   background-size: 25px;
@@ -138,10 +138,19 @@ input::placeholder {
 
 .table {
   table-layout: auto;
+  min-width: 800px;
+  width: auto;
   background-color: #d2d2d2;
   border: 1px solid #d2d2d2;
   border-radius: 5px !important;
   overflow: hidden;
+}
+
+.table th,
+.table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .page-item .page-link {
@@ -393,7 +402,9 @@ h5 {
 }
 
 .data-table {
-  overflow: scroll;
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
 }
 
 .data-table-content {
@@ -413,19 +424,51 @@ td, th {
 }
 
 .large-table-col {
-  max-width: 1000px !important;
+  max-width: 300px !important;
+  min-width: 150px !important;
   font-size: 13px !important;
   padding-left: 10px !important;
   padding-top: 15px !important;
   padding-bottom: 15px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 .table-col {
   max-width: 200px !important;
+  min-width: 100px !important;
   font-size: 13px !important;
   padding-left: 10px !important;
   padding-top: 15px !important;
   padding-bottom: 15px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.address-col {
+  max-width: 200px !important;
+  min-width: 150px !important;
+  font-size: 13px !important;
+  padding-left: 10px !important;
+  padding-top: 15px !important;
+  padding-bottom: 15px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.net-address-col {
+  max-width: 500px !important;
+  min-width: 300px !important;
+  font-size: 13px !important;
+  padding-left: 10px !important;
+  padding-top: 15px !important;
+  padding-bottom: 15px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 .table-head {
@@ -550,7 +593,7 @@ td, th {
 }
 
 #nav-social-icon1 {
-  background-image: url("../public/discord-filled.png");
+  background-image: url("/discord-filled.png");
   margin-right: 10px;
   margin-top: 3px;
   width: 30px;
@@ -558,7 +601,7 @@ td, th {
 }
 
 #nav-social-icon2 {
-  background-image: url("../public/twitter.png");
+  background-image: url("/twitter.png");
   width: 25px;
   height: 25px;
 }

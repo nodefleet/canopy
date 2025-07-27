@@ -1,6 +1,6 @@
-import { objEmpty } from "@/components/util";
+import { objEmpty } from "./util";
 import { useRef, useState } from "react";
-import { CopyIcon } from "@/components/svg_icons";
+import { CopyIcon } from "./svg_icons";
 
 // A light neat stylable JSON viewer
 function CanaJSON({ state, setState, JsonViewVariant }) {

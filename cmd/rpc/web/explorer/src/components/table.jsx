@@ -11,14 +11,31 @@ import {
   convertTx,
   toCNPY,
   formatLocaleNumber,
-} from "@/components/util";
+} from "./util";
 
 // convertValue() converts the value based on its key and handles different types
-function convertValue(k, v, openModal) {
+function convertValue(k, v, openModal, tableType) {
   if (k === "Id" || k === "Data") return v;
-  if (k === "publicKey") return <Truncate text={v} />;
+  if (k === "publicKey") {
+    // In validators tab, publicKey should not be clickable
+    if (tableType === "validators") {
+      return <Truncate text={v} start={6} end={6} />;
+    }
+    return (
+      <a href="#" onClick={() => openModal(v)} style={{ cursor: "pointer" }}>
+        <Truncate text={v} start={6} end={6} />
+      </a>
+    );
+  }
+  if (k === "address") {
+    return (
+      <a href="#" onClick={() => openModal(v)} style={{ cursor: "pointer" }}>
+        <Truncate text={v} start={6} end={6} />
+      </a>
+    );
+  }
   if (isHex(v) || k === "height") {
-    const content = isNumber(v) ? v : <Truncate text={v} />;
+    const content = isNumber(v) ? v : <Truncate text={v} start={6} end={6} />;
     return (
       <a href="#" onClick={() => openModal(v)} style={{ cursor: "pointer" }}>
         {content}
@@ -227,11 +244,18 @@ export default function DTable(props) {
         <tbody>
           {sortedData.map((val, idx) => (
             <tr key={idx}>
-              {Object.keys(val).map((k, i) => (
-                <td key={i} className={k === 'Id' ? 'large-table-col' : 'table-col'}>
-                  {convertValue(k, val[k], props.openModal)}
-                </td>
-              ))}
+              {Object.keys(val).map((k, i) => {
+                let className = 'table-col';
+                if (k === 'Id') className = 'large-table-col';
+                else if (k === 'publicKey' || k === 'address') className = 'address-col';
+                else if (k === 'netAddress') className = 'net-address-col';
+                
+                return (
+                  <td key={i} className={className}>
+                    {convertValue(k, val[k], props.openModal, tableData.type)}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

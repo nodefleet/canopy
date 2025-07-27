@@ -1,4 +1,4 @@
-import { addDate, convertBytes, convertNumber, convertTime } from "@/components/util";
+import { addDate, convertBytes, convertNumber, convertTime } from "./util";
 import { Card, Col, Row } from "react-bootstrap";
 import Truncate from "react-truncate-inside";
 

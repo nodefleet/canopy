@@ -1,15 +1,15 @@
-import Navigation from "@/components/navbar";
-import { AccountWithTxs, Height, Keystore, Params, Validator } from "@/components/api";
-import { createContext, use, useEffect, useState } from "react";
-import Accounts from "@/components/account";
-import Dashboard from "@/components/dashboard";
-import Governance from "@/components/governance";
-import Footer from "@/components/footer";
+import Navigation from "./components/navbar";
+import { AccountWithTxs, Height, Keystore, Params, Validator } from "./components/api";
+import { createContext, useEffect, useState } from "react";
+import Accounts from "./components/account";
+import Dashboard from "./components/dashboard";
+import Governance from "./components/governance";
+import Footer from "./components/footer";
 import { Spinner } from "react-bootstrap";
 
 export const KeystoreContext = createContext();
 
-export default function Home() {
+export default function App() {
   const [state, setState] = useState({
     navIdx: 0,
     keystore: null,
@@ -82,7 +82,7 @@ export default function Home() {
   }
   return (
     <KeystoreContext.Provider value={state.keystore}>
-      <div id="container" class="content-light">
+      <div id="container" className="content-light">
         <Navigation {...state} setActiveKey={queryAPI} setNavIdx={setNavIdx} />
         <div id="pageContent">
           {state.navIdx == 0 && (
