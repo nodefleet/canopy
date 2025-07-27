@@ -1,2 +1,16 @@
 .docker
 cmd/tps/data
+.git
+.gitignore
+*.md
+node_modules
+.env*
+.vscode
+.idea
+*.log
+bin
+vendor
+dist
+build
+*.test
+coverage.out

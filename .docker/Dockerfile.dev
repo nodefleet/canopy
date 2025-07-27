@@ -1,0 +1,54 @@
+FROM golang:1.23.9-alpine AS dev
+
+RUN apk add --no-cache make bash nodejs npm git
+
+ARG EXPLORER_BASE_PATH
+ARG WALLET_BASE_PATH
+
+WORKDIR /go/src/github.com/canopy-network/canopy
+
+# Install air for hot reloading
+RUN go install github.com/cosmtrek/air@latest
+
+# Copy and cache dependencies
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY cmd/rpc/web/wallet/package*.json ./cmd/rpc/web/wallet/
+COPY cmd/rpc/web/explorer/package*.json ./cmd/rpc/web/explorer/
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefix ./cmd/rpc/web/wallet && \
+    npm ci --prefix ./cmd/rpc/web/explorer
+
+ENV EXPLORER_BASE_PATH=${EXPLORER_BASE_PATH}
+ENV WALLET_BASE_PATH=${WALLET_BASE_PATH}
+ENV CGO_ENABLED=0
+
+# Copy source code
+COPY . .
+
+# Create .air.toml for hot reloading
+RUN echo 'root = "."' > .air.toml && \
+    echo 'testdata_dir = "testdata"' >> .air.toml && \
+    echo 'tmp_dir = "tmp"' >> .air.toml && \
+    echo '[build]' >> .air.toml && \
+    echo '  args_bin = ["start"]' >> .air.toml && \
+    echo '  bin = "./tmp/main"' >> .air.toml && \
+    echo '  cmd = "go build -o ./tmp/main ./cmd/main/..."' >> .air.toml && \
+    echo '  delay = 1000' >> .air.toml && \
+    echo '  exclude_dir = ["tmp", "vendor", "testdata", ".docker"]' >> .air.toml && \
+    echo '  exclude_file = []' >> .air.toml && \
+    echo '  exclude_regex = ["_test.go"]' >> .air.toml && \
+    echo '  exclude_unchanged = false' >> .air.toml && \
+    echo '  follow_symlink = false' >> .air.toml && \
+    echo '  full_bin = ""' >> .air.toml && \
+    echo '  include_dir = []' >> .air.toml && \
+    echo '  include_ext = ["go", "tpl", "tmpl", "html"]' >> .air.toml && \
+    echo '  kill_delay = "0s"' >> .air.toml && \
+    echo '  log = "build-errors.log"' >> .air.toml && \
+    echo '  send_interrupt = false' >> .air.toml && \
+    echo '  stop_on_root = false' >> .air.toml
+
+EXPOSE 50000 50001 50002 50003 9001 6060
+
+CMD ["air", "-c", ".air.toml"]

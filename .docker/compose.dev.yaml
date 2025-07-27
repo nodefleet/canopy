@@ -1,0 +1,28 @@
+services:
+  node-1-dev:
+    container_name: node-1-dev
+    build:
+      context: ..
+      dockerfile: .docker/Dockerfile.dev
+      args:
+        EXPLORER_BASE_PATH: ""
+        WALLET_BASE_PATH: ""
+    ports:
+      - 50000:50000 # Wallet
+      - 50001:50001 # Explorer
+      - 50002:50002 # RPC
+      - 50003:50003 # Admin RPC
+      - 9001:9001   # TCP P2P
+      - 6060:6060   # Debug
+    networks:
+      - canopy
+    volumes:
+      - ./volumes/node_1:/root/.canopy
+      - ..:/go/src/github.com/canopy-network/canopy # Mount source for hot reload
+    environment:
+      - GOPATH=/go
+    working_dir: /go/src/github.com/canopy-network/canopy
+
+networks:
+  canopy:
+    driver: bridge

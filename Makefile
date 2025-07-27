@@ -71,12 +71,12 @@ endif
 
 ## docker/build: build the compose containers
 docker/build:
-	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) build
+	DOCKER_BUILDKIT=1 $(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) build
 
 ## docker/up: build and start the compose containers in detached mode
 docker/up:
 	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) down && \
-	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) up --build -d
+	DOCKER_BUILDKIT=1 $(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) up --build -d
 
 ## docker/down: stop the compose containers
 docker/down:
@@ -90,3 +90,12 @@ docker/up-fast:
 ## docker/logs: show the latest logs of the compose containers
 docker/logs:
 	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) logs -f --tail=1000
+
+## docker/dev: start development environment with hot reload
+docker/dev:
+	$(DOCKER_COMPOSE_CMD) -f .docker/compose.dev.yaml down && \
+	DOCKER_BUILDKIT=1 $(DOCKER_COMPOSE_CMD) -f .docker/compose.dev.yaml up --build -d
+
+## docker/prune: clean up docker build cache
+docker/prune:
+	docker builder prune -af
