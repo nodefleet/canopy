@@ -14,10 +14,10 @@ import (
 
 const (
 	// GLOBAL CONSTANTS
-	UnknownChainId         = uint64(0)            // the default 'unknown' chain id
-	CanopyChainId          = uint64(1)            // NOTE: to not break nested-chain recursion, this should not be used except for 'default config/genesis' developer setups
-	DAOPoolID              = 2*math.MaxUint16 + 1 // must be above the MaxUint16 * 2 to ensure no 'overlap' with 'chainId + EscrowAddend'
-	CanopyMainnetNetworkId = 1                    // the identifier of the 'mainnet' of Canopy
+	UnknownChainId   = uint64(0)            // the default 'unknown' chain id
+	CanopyChainId    = uint64(1)            // NOTE: to not break nested-chain recursion, this should not be used except for 'default config/genesis' developer setups
+	DAOPoolID        = 2*math.MaxUint16 + 1 // must be above the MaxUint16 * 2 to ensure no 'overlap' with 'chainId + EscrowAddend'
+	MainnetNetworkId = 1                    // the identifier of the 'mainnet' of Canopy
 )
 
 const (
@@ -54,6 +54,22 @@ func DefaultConfig() Config {
 		MempoolConfig:      DefaultMempoolConfig(),
 		MetricsConfig:      DefaultMetricsConfig(),
 	}
+}
+
+// CHAIN CONFIG BELOW
+type ChainConfig struct {
+	ChainId         uint64 `json:"chainId,omitempty"`         // the unique identifier of the chain (1 for CNPY)
+	ChainName       string `json:"name,omitempty"`            // the name of the chain (Canopy)
+	ChainSymbol     string `json:"symbol,omitempty"`          // the ticker of the chain (like CNPY)
+	Website         string `json:"website,omitempty"`         // the website of the chain
+	LogoURI         string `json:"logoURI,omitempty"`         // the uri where the logo is located
+	BannerURI       string `json:"bannerURI,omitempty"`       // the uri where the banner is located
+	ExplorerLogoURI string `json:"explorerLogoURI,omitempty"` // the banner for the explorer
+	WalletLogoURI   string `json:"walletLogoURI,omitempty"`   // the banner for the wallet
+	Color1Hex       string `json:"color1Hex,omitempty"`       // the primary color for the front end
+	Color2Hex       string `json:"color2Hex,omitempty"`       // the secondary color for the front end
+	Description     string `json:"description,omitempty"`     // description of the chain
+	ConsensusPreset string `json:"consensusPreset,omitempty"` // the consensus preset for the chain
 }
 
 // MAIN CONFIG BELOW
@@ -148,15 +164,15 @@ func DefaultStateMachineConfig() StateMachineConfig { return StateMachineConfig{
 // - async faults may lead to extended block time
 // - social consensus dictates BlockTime for the protocol - being oo fast or too slow can lead to Non-Signing and Consensus failures
 type ConsensusConfig struct {
-	NewHeightTimeoutMs      int `json:"newHeightTimeoutMS"`      // how long (in milliseconds) the replica sleeps before moving to the ELECTION phase
-	ElectionTimeoutMS       int `json:"electionTimeoutMS"`       // minus VRF creation time (if Candidate), is how long (in milliseconds) the replica sleeps before moving to ELECTION-VOTE phase
-	ElectionVoteTimeoutMS   int `json:"electionVoteTimeoutMS"`   // minus QC validation + vote time, is how long (in milliseconds) the replica sleeps before moving to PROPOSE phase
-	ProposeTimeoutMS        int `json:"proposeTimeoutMS"`        // minus Proposal creation time (if Leader), is how long (in milliseconds) the replica sleeps before moving to PROPOSE-VOTE phase
-	ProposeVoteTimeoutMS    int `json:"proposeVoteTimeoutMS"`    // minus QC validation + vote time, is how long (in milliseconds) the replica sleeps before moving to PRECOMMIT phase
-	PrecommitTimeoutMS      int `json:"precommitTimeoutMS"`      // minus Proposal-QC aggregation time (if Leader), how long (in milliseconds) the replica sleeps before moving to the PRECOMMIT-VOTE phase
-	PrecommitVoteTimeoutMS  int `json:"precommitVoteTimeoutMS"`  // minus QC validation + vote time, is how long (in milliseconds) the replica sleeps before moving to COMMIT phase
-	CommitTimeoutMS         int `json:"commitTimeoutMS"`         // minus Precommit-QC aggregation time (if Leader), how long (in milliseconds) the replica sleeps before moving to the COMMIT-PROCESS phase
-	RoundInterruptTimeoutMS int `json:"roundInterruptTimeoutMS"` // minus gossiping current Round time, how long (in milliseconds) the replica sleeps before moving to PACEMAKER phase
+	NewHeightTimeoutMs      int `json:"newHeightTimeoutMS,omitempty"`      // how long (in milliseconds) the replica sleeps before moving to the ELECTION phase
+	ElectionTimeoutMS       int `json:"electionTimeoutMS,omitempty"`       // minus VRF creation time (if Candidate), is how long (in milliseconds) the replica sleeps before moving to ELECTION-VOTE phase
+	ElectionVoteTimeoutMS   int `json:"electionVoteTimeoutMS,omitempty"`   // minus QC validation + vote time, is how long (in milliseconds) the replica sleeps before moving to PROPOSE phase
+	ProposeTimeoutMS        int `json:"proposeTimeoutMS,omitempty"`        // minus Proposal creation time (if Leader), is how long (in milliseconds) the replica sleeps before moving to PROPOSE-VOTE phase
+	ProposeVoteTimeoutMS    int `json:"proposeVoteTimeoutMS,omitempty"`    // minus QC validation + vote time, is how long (in milliseconds) the replica sleeps before moving to PRECOMMIT phase
+	PrecommitTimeoutMS      int `json:"precommitTimeoutMS,omitempty"`      // minus Proposal-QC aggregation time (if Leader), how long (in milliseconds) the replica sleeps before moving to the PRECOMMIT-VOTE phase
+	PrecommitVoteTimeoutMS  int `json:"precommitVoteTimeoutMS,omitempty"`  // minus QC validation + vote time, is how long (in milliseconds) the replica sleeps before moving to COMMIT phase
+	CommitTimeoutMS         int `json:"commitTimeoutMS,omitempty"`         // minus Precommit-QC aggregation time (if Leader), how long (in milliseconds) the replica sleeps before moving to the COMMIT-PROCESS phase
+	RoundInterruptTimeoutMS int `json:"roundInterruptTimeoutMS,omitempty"` // minus gossiping current Round time, how long (in milliseconds) the replica sleeps before moving to PACEMAKER phase
 }
 
 // DefaultConsensusConfig() configures the block time
@@ -203,7 +219,7 @@ type P2PConfig struct {
 
 func DefaultP2PConfig() P2PConfig {
 	return P2PConfig{
-		NetworkID:           CanopyMainnetNetworkId,
+		NetworkID:           MainnetNetworkId,
 		ListenAddress:       "0.0.0.0:9001", // default TCP address is 9001 for chain 1 (9002 for chain 2 etc.)
 		ExternalAddress:     "",             // should be populated by the user
 		MaxInbound:          21,             // inbounds should be close to 3x greater than outbounds
@@ -217,9 +233,7 @@ func DefaultP2PConfig() P2PConfig {
 // StoreConfig is user configurations for the key value database
 type StoreConfig struct {
 	DataDirPath    string `json:"dataDirPath"`    // path of the designated folder where the application stores its data
-	DBName         string `json:"dbName"`         // name of the database
 	IndexByAccount bool   `json:"indexByAccount"` // index transactions by account
-	InMemory       bool   `json:"inMemory"`       // non-disk database, only for testing
 }
 
 // DefaultDataDirPath() is $USERHOME/.canopy
@@ -239,9 +253,7 @@ func DefaultDataDirPath() string {
 func DefaultStoreConfig() StoreConfig {
 	return StoreConfig{
 		DataDirPath:    DefaultDataDirPath(), // use the default data dir path
-		DBName:         "canopy",             // 'canopy' database name
 		IndexByAccount: true,                 // index transactions by account
-		InMemory:       false,                // persist to disk, not memory
 	}
 }
 
