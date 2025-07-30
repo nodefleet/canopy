@@ -95,7 +95,14 @@ function convertTabData(state, v, tab) {
         return v;
     }
   } else if ("validator" in v && !state.modalState.accOnly) {
-    return cpyObj(v.validator);
+    let validator = cpyObj(v.validator);
+    if (validator.committees && Array.isArray(validator.committees)) {
+      validator.committees = validator.committees.join(",");
+    }
+    if (validator.stakedAmount) {
+      validator.stakedAmount = toCNPY(validator.stakedAmount);
+    }
+    return validator;
   } else if ("account" in v) {
     let txs = v.sent_transactions.results.length > 0 ? v.sent_transactions.results : v.rec_transactions.results;
     switch (tab) {

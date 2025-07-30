@@ -62,7 +62,7 @@ func (c *Controller) ListenForBlock() {
 				// if new height notified
 				if err.Error() == lib.ErrNewHeight().Error() {
 					// if fallen out of sync
-					if quit = syncDetector.Add(sender, msg.Message, qc.Header.Height, c.P2P.PeerCount()); quit {
+					if quit = syncDetector.Add(sender, msg.Message, blockMessage.BlockAndCertificate.Header.Height, c.P2P.PeerCount()); quit {
 						// exit iteration
 						return
 					}

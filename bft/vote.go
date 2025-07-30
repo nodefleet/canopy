@@ -141,18 +141,10 @@ func (b *BFT) handleHighQCVDFAndEvidence(vote *Message) lib.ErrorI {
 				b.RCBuildHeight = vote.RcBuildHeight
 			}
 		}
-		// handle VDF
-		if vote.Vdf != nil && vote.Vdf.Iterations != 0 {
-			if b.HighVDF == nil || vote.Vdf.Iterations > b.HighVDF.Iterations {
-				ok, err := b.VerifyVDF(vote)
-				if err != nil {
-					return err
-				}
-				if ok {
-					b.log.Infof("Replica %s submitted a highVDF", lib.BytesToTruncatedString(vote.Signature.PublicKey))
-					b.HighVDF = vote.Vdf
-				}
-			}
+		// pre handle VDF if enabled
+		if b.Config.RunVDF && vote.Vdf != nil && vote.Vdf.Iterations != 0 {
+			// save the obtained VDF vote to be processed at the PROPOSE phase
+			b.VDFCache = append(b.VDFCache, vote)
 		}
 		// combine double sign evidence
 		for _, evidence := range vote.LastDoubleSignEvidence {

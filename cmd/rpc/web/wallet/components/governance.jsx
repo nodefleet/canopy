@@ -77,7 +77,7 @@ export default function Governance({ keygroup, account: accountWithTxs, validato
   // onFormChange() handles the form input change callback
   function onFormChange(key, value, newValue) {
     if (key === "param_space") {
-      setState({ ...state, paramSpace: newValue });
+      setState(prevState => ({ ...prevState, paramSpace: newValue }));
     }
   }
 
@@ -150,7 +150,7 @@ export default function Governance({ keygroup, account: accountWithTxs, validato
 
   // addVoteAPI() executes an 'Add Vote' API call and sets the state when complete
   function addVoteAPI(json, approve) {
-    return AddVote(json, approve).then((_) => setState({ ...state, voteOnProposalAccord: "1", toast: "Voted!" }));
+    return AddVote(json, approve).then((_) => setState(prevState => ({ ...prevState, voteOnProposalAccord: "1", toast: "Voted!" })));
   }
 
   // submitProposalAPI() executes a 'Raw Tx' API call and sets the state when complete
@@ -167,31 +167,31 @@ export default function Governance({ keygroup, account: accountWithTxs, validato
 
   // delVoteAPI() executes a 'Delete Vote' API call and sets the state when complete
   function delVoteAPI(json) {
-    return DelVote(json).then((_) => setState({ ...state, voteOnProposalAccord: "1", toast: "Deleted!" }));
+    return DelVote(json).then((_) => setState(prevState => ({ ...prevState, voteOnProposalAccord: "1", toast: "Deleted!" })));
   }
 
   // startPollAPI() executes a 'Start Poll' API call and sets the state when complete
   function startPollAPI(address, json, password) {
     return StartPoll(address, json, password).then((_) =>
-      setState({ ...state, voteOnPollAccord: "1", toast: "Started Poll!" }),
+      setState(prevState => ({ ...prevState, voteOnPollAccord: "1", toast: "Started Poll!" })),
     );
   }
 
   // votePollAPI() executes a 'Vote Poll' API call and sets the state when complete
   function votePollAPI(address, json, approve, password) {
     return VotePoll(address, json, approve, password).then((_) =>
-      setState({ ...state, voteOnPollAccord: "1", toast: "Voted!" }),
+      setState(prevState => ({ ...prevState, voteOnPollAccord: "1", toast: "Voted!" })),
     );
   }
 
   // handlePropClose() closes the proposal modal from a button or modal x
   function handlePropClose() {
-    setState({ ...state, paramSpace: "", txResult: {}, showPropModal: false });
+    setState(prevState => ({ ...prevState, paramSpace: "", txResult: {}, showPropModal: false }));
   }
 
   // handlePropOpen() opens the proposal modal
   function handlePropOpen(type) {
-    setState({ ...state, txPropType: type, showPropModal: true, paramSpace: "", txResult: {} });
+    setState(prevState => ({ ...prevState, txPropType: type, showPropModal: true, paramSpace: "", txResult: {} }));
   }
 
   // sendRawTx() executes the RawTx API call and sets the state when complete
@@ -204,7 +204,7 @@ export default function Governance({ keygroup, account: accountWithTxs, validato
   // createDAOTransferTx() executes a dao transfer transaction API call and sets the state when complete
   function createDAOTransferTx(address, amount, startBlock, endBlock, memo, fee, password) {
     TxDAOTransfer(address, amount, startBlock, endBlock, memo, fee, password, false).then((res) => {
-      setState({ ...state, txResult: res });
+      setState(prevState => ({ ...prevState, txResult: res }));
     });
   }
 
@@ -212,7 +212,7 @@ export default function Governance({ keygroup, account: accountWithTxs, validato
   function createParamChangeTx(address, paramSpace, paramKey, paramValue, startBlock, endBlock, memo, fee, password) {
     TxChangeParameter(address, paramSpace, paramKey, paramValue, startBlock, endBlock, memo, fee, password, false).then(
       (res) => {
-        setState({ ...state, txResult: res });
+        setState(prevState => ({ ...prevState, txResult: res }));
       },
     );
   }
@@ -482,7 +482,7 @@ function Accord({
               onClick={() => {
                 let text = state[targetName];
                 if (isJSON && (text === "" || !isValidJSON(state[targetName]))) {
-                  setState({ ...state, toast: "Invalid JSON!" });
+                  setState(prevState => ({ ...prevState, toast: "Invalid JSON!" }));
                   return;
                 }
                 btn.onClick();

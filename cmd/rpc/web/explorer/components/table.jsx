@@ -17,6 +17,7 @@ import {
 function convertValue(k, v, openModal) {
   if (k === "Id" || k === "Data") return v;
   if (k === "publicKey") return <Truncate text={v} />;
+  if (k === "netAddress") return <span className="net-address">{v}</span>;
   if (isHex(v) || k === "height") {
     const content = isNumber(v) ? v : <Truncate text={v} />;
     return (
@@ -80,7 +81,7 @@ function convertBlock(v) {
 function convertValidator(v) {
   let value = Object.assign({}, v);
   value.stakedAmount = toCNPY(value.stakedAmount);
-  value.committees = value.committees.toString();
+  value.committees = value.committees.join(",");
   return value;
 }
 
@@ -182,7 +183,7 @@ function getTableBody(v) {
 
 // DTable() renders the main data table with sorting, filtering, and pagination
 export default function DTable(props) {
-  const { filterText, sortColumn, sortDirection, category, committee, tableData } = props.state;
+  const { filterText, sortColumn, sortDirection, category, committee, tableData, tableLoading } = props.state;
   const sortedData = sortData(filterData(getTableBody(tableData), filterText), sortColumn, sortDirection);
   return (
     <div className="data-table">
@@ -205,7 +206,7 @@ export default function DTable(props) {
         <h5 className="data-table-head">{getHeader(tableData)}</h5>
       </div>
 
-      <Table responsive bordered hover size="sm" className="table">
+      <Table responsive bordered hover size="sm" className="table" style={{ opacity: tableLoading ? 0.6 : 1, transition: 'opacity 0.2s' }}>
         <thead>
           <tr>
             {Object.keys(getTableBody(tableData)[0]).map((s, i) => (
@@ -213,10 +214,12 @@ export default function DTable(props) {
                 key={i}
                 className="table-head"
                 onClick={() => {
-                  const direction = sortColumn === s && sortDirection === "asc" ? "desc" : "asc";
-                  props.setState({ ...props.state, sortColumn: s, sortDirection: direction });
+                  if (!tableLoading) {
+                    const direction = sortColumn === s && sortDirection === "asc" ? "desc" : "asc";
+                    props.setState({ ...props.state, sortColumn: s, sortDirection: direction });
+                  }
                 }}
-                style={{ cursor: "pointer" }}
+                style={{ cursor: tableLoading ? "wait" : "pointer" }}
               >
                 {upperCaseAndRepUnderscore(s)}
                 {sortColumn === s && (sortDirection === "asc" ? " ↑" : " ↓")}
@@ -228,7 +231,7 @@ export default function DTable(props) {
           {sortedData.map((val, idx) => (
             <tr key={idx}>
               {Object.keys(val).map((k, i) => (
-                <td key={i} className={k === 'Id' ? 'large-table-col' : 'table-col'}>
+                <td key={i} className={k === 'Id' ? 'large-table-col' : k === 'netAddress' ? 'net-address-col' : 'table-col'}>
                   {convertValue(k, val[k], props.openModal)}
                 </td>
               ))}

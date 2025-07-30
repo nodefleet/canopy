@@ -130,8 +130,8 @@ export default function Accounts({ keygroup, account, validator, setActiveKey, p
 
   // resetState() resets the state back to its initial
   function resetState() {
-    setState({
-      ...state,
+    setState(prevState => ({
+      ...prevState,
       pk: {},
       txResult: {},
       showSubmit: true,
@@ -139,7 +139,7 @@ export default function Accounts({ keygroup, account, validator, setActiveKey, p
       showPKModal: false,
       showNewModal: false,
       showPKImportModal: false
-    });
+    }));
   }
 
   // onFormFieldChange() handles the form input change callback
@@ -151,7 +151,7 @@ export default function Accounts({ keygroup, account, validator, setActiveKey, p
 
   // showModal() makes the modal visible
   function showModal(t) {
-    setState({ ...state, showModal: true, txType: t });
+    setState(prevState => ({ ...prevState, showModal: true, txType: t }));
   }
 
   // getAccountType() returns the type of validator account (custodial / non-custodial)
@@ -208,7 +208,7 @@ export default function Accounts({ keygroup, account, validator, setActiveKey, p
   function onPKFormSubmit(e) {
     onFormSubmit(state, e, ks, (r) =>
       KeystoreGet(r.sender, r.password, r.nickname).then((r) => {
-        setState({ ...state, showSubmit: Object.keys(state.txResult).length === 0, pk: r });
+        setState(prevState => ({ ...prevState, showSubmit: Object.keys(prevState.txResult).length === 0, pk: r }));
       })
     );
   }
@@ -217,7 +217,7 @@ export default function Accounts({ keygroup, account, validator, setActiveKey, p
   function onNewPKFormSubmit(e) {
     onFormSubmit(state, e, ks, (r) =>
       KeystoreNew(r.password, r.nickname).then((r) => {
-        setState({ ...state, showSubmit: Object.keys(state.txResult).length === 0, pk: r });
+        setState(prevState => ({ ...prevState, showSubmit: Object.keys(prevState.txResult).length === 0, pk: r }));
         setActivePrivateKey(r.nickname);
       })
     );
@@ -228,12 +228,12 @@ export default function Accounts({ keygroup, account, validator, setActiveKey, p
     onFormSubmit(state, e, ks, (r) => {
       if (r.private_key) {
         void KeystoreImport(r.private_key, r.password, r.nickname).then((_) => {
-          setState({ ...state, showSpinner: true });
+          setState(prevState => ({ ...prevState, showSpinner: true }));
           setActivePrivateKey(r.nickname, "showPKImportModal");
         });
       } else {
         void KeystoreNew(r.password, r.nickname).then((_) => {
-          setState({ ...state, showSpinner: true });
+          setState(prevState => ({ ...prevState, showSpinner: true }));
           setActivePrivateKey(r.nickname, "showPKImportModal");
         });
       }
@@ -308,17 +308,17 @@ export default function Accounts({ keygroup, account, validator, setActiveKey, p
 
       const txFunction = txMap[state.txType];
       if (txFunction) {
-        setState({ ...state, showAlert: false });
+        setState(prevState => ({ ...prevState, showAlert: false }));
         txFunction()
           .then((result) => {
-            setState({ ...state, showSubmit: !submit, txResult: result, showAlert: false });
+            setState(prevState => ({ ...prevState, showSubmit: !submit, txResult: result, showAlert: false }));
           })
           .catch((e) => {
-            setState({
-              ...state,
+            setState(prevState => ({
+              ...prevState,
               showAlert: true,
               alertMsg: "Transaction failed. Please verify the fields and try again."
-            });
+            }));
           });
       }
     });
@@ -445,17 +445,17 @@ export default function Accounts({ keygroup, account, validator, setActiveKey, p
         keystore={ks}
         onFormFieldChange={onFormFieldChange}
       />
-      <Button id="pk-button" variant="outline-secondary" onClick={() => setState({ ...state, showNewModal: true })}>
+      <Button id="pk-button" variant="outline-secondary" onClick={() => setState(prevState => ({ ...prevState, showNewModal: true }))}>
         New Private Key
       </Button>
       <Button
         id="import-pk-button"
         variant="outline-secondary"
-        onClick={() => setState({ ...state, showPKImportModal: true })}
+        onClick={() => setState(prevState => ({ ...prevState, showPKImportModal: true }))}
       >
         Import Private Key
       </Button>
-      <Button id="reveal-pk-button" variant="outline-danger" onClick={() => setState({ ...state, showPKModal: true })}>
+      <Button id="reveal-pk-button" variant="outline-danger" onClick={() => setState(prevState => ({ ...prevState, showPKModal: true }))}>
         Reveal Private Key
       </Button>
       <Button

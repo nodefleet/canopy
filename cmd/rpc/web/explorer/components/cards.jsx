@@ -94,9 +94,9 @@ function getCardSubHeader(props, consensusDuration, idx) {
       return "blk size: " + convertBytes(v.results[0].meta.size);
     case 3:
       if (!props.canopyCommittee.results) {
-        return 0 + " unique vals";
+        return 0 + " vals";
       }
-      return props.canopyCommittee.results.length + " unique vals";
+      return props.canopyCommittee.results.length + " vals";
   }
 }
 

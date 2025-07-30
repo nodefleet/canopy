@@ -1,6 +1,6 @@
 import Navigation from "@/components/navbar";
 import { AccountWithTxs, Height, Keystore, Params, Validator } from "@/components/api";
-import { createContext, use, useEffect, useState } from "react";
+import { createContext, use, useEffect, useState, useCallback, useRef } from "react";
 import Accounts from "@/components/account";
 import Dashboard from "@/components/dashboard";
 import Governance from "@/components/governance";
@@ -20,13 +20,17 @@ export default function Home() {
     keys: [],
     params: {},
   });
-  const setNavIdx = (i) => setState({ ...state, navIdx: i });
+  const keyIdxRef = useRef(state.keyIdx);
+  keyIdxRef.current = state.keyIdx;
+  
+  const setNavIdx = (i) => setState(prevState => ({ ...prevState, navIdx: i }));
 
-  function queryAPI(i = state.keyIdx) {
+  const queryAPI = useCallback((i = keyIdxRef.current) => {
+    keyIdxRef.current = i;
     Keystore().then((ks) => {
       if (!ks.addressMap || Object.keys(ks.addressMap).length === 0) {
         console.warn("mergedKS is empty. No data to query.");
-        setState({ ...state, keystore: {}, account: {}, validator: {} }); // Handle empty case
+        setState(prevState => ({ ...prevState, keystore: {}, account: {}, validator: {} }));
         return;
       }
 
@@ -51,8 +55,8 @@ export default function Home() {
           settledResults.push(result.value);
         }
 
-        setState({
-          ...state,
+        setState(prevState => ({
+          ...prevState,
           keys: Object.keys(mergedKS),
           keyIdx: i,
           keystore: mergedKS,
@@ -60,22 +64,22 @@ export default function Home() {
           validator: settledResults[1],
           height: settledResults[2],
           params: settledResults[3],
-        });
+        }));
       });
     });
-  }
+  }, []);
 
   // Initial API call on component mount
   useEffect(() => {
     queryAPI();
-  }, []); // Empty dependency array ensures this runs only once on mount
+  }, [queryAPI]); // Run once on mount and if queryAPI changes
 
   useEffect(() => {
     const i = setInterval(() => {
-      queryAPI();
+      queryAPI(keyIdxRef.current);
     }, 4000);
     return () => clearInterval(i);
-  });
+  }, [queryAPI]);
 
   if (state.keystore === null) {
     return <Spinner id="spinner" />;

@@ -2,7 +2,9 @@ package bft
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
+	"slices"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -28,6 +30,7 @@ type BFT struct {
 	SortitionData *lib.SortitionData     // the current data being used for VRF+CDF Leader Election
 	VDFService    *lib.VDFService        // the verifiable delay service, run once per block as a deterrent against long-range-attacks
 	HighVDF       *crypto.VDF            // the highest VDF among replicas - if the chain is using VDF for long-range-attack protection
+	VDFCache      []*Message             // the cache of VDFs used for long-range-attack protection, validated at the PROPOSE phase
 
 	ByzantineEvidence *ByzantineEvidence // evidence of faulty or malicious Validators collected during the BFT process
 	PartialQCs        PartialQCs         // potentially implicating evidence that may turn into ByzantineEvidence if paired with an equivocating QC
@@ -80,6 +83,7 @@ func New(c lib.Config, valKey crypto.PrivateKeyI, rootHeight, height uint64, con
 		VDFService:        vdf,
 		Metrics:           m,
 		HighVDF:           new(crypto.VDF),
+		VDFCache:          []*Message{},
 	}, nil
 }
 
@@ -286,6 +290,12 @@ func (b *BFT) StartProposePhase() {
 		return
 	}
 	b.log.Info("Self is the proposer")
+	// select the highest VDF from the cache
+	highVDF, err := b.selectHighestVDF()
+	if err != nil {
+		return
+	}
+	b.HighVDF = highVDF
 	// produce new proposal or use highQC as the proposal
 	if b.HighQC == nil {
 		b.RCBuildHeight, b.Block, b.Results, err = b.ProduceProposal(b.ByzantineEvidence, b.HighVDF)
@@ -521,6 +531,7 @@ func (b *BFT) RoundInterrupt() {
 	b.log.Warnf("Starting next round in %.2f secs", (time.Duration(b.Config.RoundInterruptTimeoutMS) * time.Millisecond).Seconds())
 	b.Phase = RoundInterrupt
 	b.BlockResult = nil
+	b.VDFCache = []*Message{}
 	b.ResetFSM()
 	// send pacemaker message
 	b.SendToReplicas(b.ValidatorSet, &Message{
@@ -620,6 +631,7 @@ func (b *BFT) NewRound(newHeight bool) {
 	b.ProposerKey = nil
 	b.Block, b.BlockHash, b.Results = nil, nil, nil
 	b.SortitionData = nil
+	b.VDFCache = []*Message{}
 }
 
 // RefreshRootChainInfo() updates the cached root chain info with the latest known
@@ -869,6 +881,34 @@ func (b *BFT) BlockToHash(blk []byte) (hash []byte) {
 		b.log.Errorf("bft.BlockToHash failed: %s", err.Error())
 	}
 	return
+}
+
+// selectHighestVDF validates the previously sent VDFs by replicas and selects the highest valid one
+func (b *BFT) selectHighestVDF() (*crypto.VDF, lib.ErrorI) {
+	// clean cache upon exit
+	defer func() {
+		b.VDFCache = []*Message{}
+	}()
+	// sort the cache by the number of VDF iterations from highest to lowest
+	slices.SortFunc(b.VDFCache, func(a, b *Message) int {
+		return cmp.Compare(b.Vdf.Iterations, a.Vdf.Iterations)
+	})
+	for _, vote := range b.VDFCache {
+		// validate VDF
+		ok, err := b.VerifyVDF(vote)
+		if err != nil {
+			// b.log.Warnf("failed to Verify VDF by replica %s: %s", lib.BytesToTruncatedString(vote.Signature.PublicKey), err.Error())
+			continue
+		}
+		if !ok {
+			continue
+		}
+		b.log.Infof("Replica %s submitted a highVDF", lib.BytesToTruncatedString(vote.Signature.PublicKey))
+		// return the highest valid VDF
+		return vote.Vdf, nil
+	}
+	// exit, no valid VDF found
+	return nil, nil
 }
 
 // phaseToString() converts the phase object to a human-readable string

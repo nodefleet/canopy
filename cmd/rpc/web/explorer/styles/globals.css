@@ -266,11 +266,15 @@ a:active {
   letter-spacing: 1.5px;
   padding-top: 10px;
   font-family: var(--font-heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-body {
   text-align: left;
   cursor: pointer;
+  overflow: hidden;
 }
 
 h5 {
@@ -281,22 +285,35 @@ h5 {
 
 .card-info-2 {
   font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-info-3 {
   float: right;
   font-size: 10px;
   padding-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50%;
 }
 
 .card-info-4 {
   font-size: 9px;
   color: #222222;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-footer {
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-body {
@@ -426,6 +443,21 @@ td, th {
   padding-left: 10px !important;
   padding-top: 15px !important;
   padding-bottom: 15px !important;
+}
+
+.net-address-col {
+  min-width: 250px !important;
+  max-width: 500px !important;
+  font-size: 13px !important;
+  padding-left: 10px !important;
+  padding-top: 15px !important;
+  padding-bottom: 15px !important;
+}
+
+.net-address {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 .table-head {

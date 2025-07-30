@@ -2,6 +2,7 @@ package bft
 
 import (
 	"fmt"
+
 	"github.com/canopy-network/canopy/lib"
 	"google.golang.org/protobuf/proto"
 )
