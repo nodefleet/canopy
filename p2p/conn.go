@@ -35,16 +35,9 @@ const (
 	BlockReqWindowS         = 2   // the 'window of time' before resetting limits for block (certificate) requests
 	GoodPeerBookRespRep     = 3   // reputation points for a good peer book response
 	GoodBlockRep            = 3   // rep boost for sending us a valid block (certificate)
-	GoodTxRep               = 3   // rep boost for sending us a valid transaction (certificate)
-	BadPacketSlash          = -1  // bad packet is received
-	NoPongSlash             = -1  // no pong received
-	TimeoutRep              = -1  // rep slash for not responding in time
 	UnexpectedBlockRep      = -1  // rep slash for sending us a block we weren't expecting
-	PeerBookReqTimeoutRep   = -1  // slash for a non-response for a peer book request
-	UnexpectedMsgRep        = -1  // slash for an unexpected message
 	InvalidMsgRep           = -3  // slash for an invalid message
 	ExceedMaxPBReqRep       = -3  // slash for exceeding the max peer book requests
-	ExceedMaxPBLenRep       = -3  // slash for exceeding the size of the peer book message
 	UnknownMessageSlash     = -3  // unknown message type is received
 	BadStreamSlash          = -3  // unknown stream id is received
 	InvalidTxRep            = -3  // rep slash for sending us an invalid transaction
@@ -60,19 +53,17 @@ var (
 
 // MultiConn: A rate-limited, multiplexed connection that utilizes a series streams with varying priority for sending and receiving
 type MultiConn struct {
-	conn          net.Conn                    // underlying connection
-	Address       *lib.PeerAddress            // authenticated peer information
-	streams       map[lib.Topic]*Stream       // multiple independent bi-directional communication channels
-	quitSending   chan struct{}               // signal to quit
-	quitReceiving chan struct{}               // signal to quit
-	sendPong      chan struct{}               // signal to send keep alive message
-	receivedPong  chan struct{}               // signal that received keep alive message
-	onError       func(error, []byte, string) // callback to call if peer errors
-	error         sync.Once                   // thread safety to ensure MultiConn.onError is only called once
-	p2p           *P2P                        // a pointer reference to the P2P module
-	close         sync.Once                   // flag to identify if MultiConn is closed
-	isAdded       atomic.Bool                 // flag to identify if MultiConn is added to the peer list and should be removed
-	log           lib.LoggerI                 // logging
+	conn           net.Conn                    // underlying connection
+	Address        *lib.PeerAddress            // authenticated peer information
+	streams        map[lib.Topic]*Stream       // multiple independent bi-directional communication channels
+	quitSending    chan struct{}               // signal to quit
+	quitReceiving  chan struct{}               // signal to quit
+	onError        func(error, []byte, string) // callback to call if peer errors
+	error          sync.Once                   // thread safety to ensure MultiConn.onError is only called once
+	p2p            *P2P                        // a pointer reference to the P2P module
+	close          sync.Once                   // flag to identify if MultiConn is closed
+	addedToPeerSet atomic.Bool                 // flag to identify if MultiConn is added to the peer list and should be removed
+	log            lib.LoggerI                 // logging
 }
 
 // NewConnection() creates and starts a new instance of a MultiConn
@@ -91,19 +82,17 @@ func (p *P2P) NewConnection(conn net.Conn) (*MultiConn, lib.ErrorI) {
 		return nil, err
 	}
 	c := &MultiConn{
-		conn:          eConn,
-		Address:       eConn.Address,
-		streams:       p.NewStreams(),
-		quitSending:   make(chan struct{}, maxChanSize),
-		quitReceiving: make(chan struct{}, maxChanSize),
-		sendPong:      make(chan struct{}, maxChanSize),
-		receivedPong:  make(chan struct{}, maxChanSize),
-		onError:       p.OnPeerError,
-		error:         sync.Once{},
-		p2p:           p,
-		close:         sync.Once{},
-		isAdded:       atomic.Bool{},
-		log:           p.log,
+		conn:           eConn,
+		Address:        eConn.Address,
+		streams:        p.NewStreams(),
+		quitSending:    make(chan struct{}, maxChanSize),
+		quitReceiving:  make(chan struct{}, maxChanSize),
+		onError:        p.OnPeerError,
+		error:          sync.Once{},
+		p2p:            p,
+		close:          sync.Once{},
+		addedToPeerSet: atomic.Bool{},
+		log:            p.log,
 	}
 	_ = c.conn.SetReadDeadline(time.Time{})
 	_ = c.conn.SetWriteDeadline(time.Time{})
@@ -200,7 +189,7 @@ func (c *MultiConn) startReceiveService() {
 		}
 	}()
 	m := limiter.New(0, 0)
-	defer func() { close(c.sendPong); close(c.receivedPong); m.Done() }()
+	defer m.Done()
 	for {
 		select {
 		default: // fires unless quit was signaled
@@ -248,8 +237,12 @@ func (c *MultiConn) Error(err error, reputationDelta ...int32) {
 	}
 	// call onError() for the peer
 	c.error.Do(func() {
+		// prevent race between adding to peer set and erroring
+		c.p2p.Lock()
+		defer c.p2p.Unlock()
 		// only try to remove the peer from set if 'was added' to the peer set
-		if c.isAdded.Swap(true) {
+		// set added as 'true' to prevent any 'after-the-fact' addition to the peer set
+		if c.addedToPeerSet.Swap(true) {
 			c.onError(err, c.Address.PublicKey, c.conn.RemoteAddr().String())
 		} else {
 			c.log.Debug(err.Error())

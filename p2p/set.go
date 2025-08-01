@@ -50,9 +50,13 @@ type Peer struct {
 
 // Add() introduces a peer to the set
 func (ps *PeerSet) Add(p *Peer) (err lib.ErrorI) {
-	if p.conn.isAdded.Swap(true) {
-		return ErrPeerAlreadyExists(lib.BytesToTruncatedString(p.Address.PublicKey))
-	}
+	defer func() {
+		// if a conn error already occurred - 'add to peer set' is set to true
+		// this prevents adding to the peer-set after a conn error
+		if err == nil && p.conn.addedToPeerSet.Swap(true) {
+			err = ErrPeerAlreadyExists(lib.BytesToTruncatedString(p.Address.PublicKey))
+		}
+	}()
 	// check if peer is already added
 	pubKey := lib.BytesToString(p.Address.PublicKey)
 	if _, found := ps.m[pubKey]; found {
@@ -88,8 +92,6 @@ func (ps *PeerSet) Add(p *Peer) (err lib.ErrorI) {
 
 // Remove() evicts a peer from the set
 func (ps *PeerSet) Remove(publicKey []byte) (peer *Peer, err lib.ErrorI) {
-	ps.Lock()
-	defer ps.Unlock()
 	peer, err = ps.get(publicKey)
 	if err != nil {
 		return

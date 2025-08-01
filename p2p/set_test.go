@@ -44,9 +44,9 @@ func TestUpdateMustConnects(t *testing.T) {
 	require.NoError(t, n1.Add(&Peer{
 		PeerInfo: &lib.PeerInfo{Address: n2.ID()},
 		conn: &MultiConn{
-			error:   sync.Once{},
-			close:   sync.Once{},
-			isAdded: atomic.Bool{},
+			error:          sync.Once{},
+			close:          sync.Once{},
+			addedToPeerSet: atomic.Bool{},
 		},
 	}))
 	toDial := n1.UpdateMustConnects([]*lib.PeerAddress{
@@ -119,14 +119,14 @@ func newTestMultiConnMock(_ *testing.T, peerPubKey []byte, conn net.Conn, p *P2P
 				ChainId: 1,
 			},
 		},
-		streams:       p.NewStreams(),
-		quitSending:   make(chan struct{}, maxChanSize),
-		quitReceiving: make(chan struct{}, maxChanSize),
-		onError:       func(err error, bytes []byte, s string) { p.log.Error(err.Error()) },
-		error:         sync.Once{},
-		p2p:           p,
-		close:         sync.Once{},
-		isAdded:       atomic.Bool{},
-		log:           p.log,
+		streams:        p.NewStreams(),
+		quitSending:    make(chan struct{}, maxChanSize),
+		quitReceiving:  make(chan struct{}, maxChanSize),
+		onError:        func(err error, bytes []byte, s string) { p.log.Error(err.Error()) },
+		error:          sync.Once{},
+		p2p:            p,
+		close:          sync.Once{},
+		addedToPeerSet: atomic.Bool{},
+		log:            p.log,
 	}
 }
