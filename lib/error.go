@@ -626,6 +626,10 @@ func ErrEmptyMessage() ErrorI {
 	return NewError(CodeEmptyMessage, StateMachineModule, "message is empty")
 }
 
+func ErrUnknownFields() ErrorI {
+	return NewError(CodeUnknownMsg, StateMachineModule, "message contains unknown fields")
+}
+
 func ErrNoSavedBlockOrResults() ErrorI {
 	return NewError(CodeNoSavedBlockOrResults, StateMachineModule, "no saved block or results to validate the msg")
 }

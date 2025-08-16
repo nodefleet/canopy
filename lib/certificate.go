@@ -33,6 +33,10 @@ func (x *QuorumCertificate) CheckBasic() ErrorI {
 		// exit with empty qc error
 		return ErrEmptyQuorumCertificate()
 	}
+	// check for unknown fields
+	//if codec.HasUnknown(x) { TODO add once QC structure is stable
+	//	return ErrUnknownFields()
+	//}
 	// sanity check the view of the QC
 	if err := x.Header.CheckBasic(); err != nil {
 		// exit with error
