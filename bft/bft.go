@@ -13,6 +13,17 @@ import (
 	"github.com/canopy-network/canopy/lib/crypto"
 )
 
+// 08/25 BYZANTINE FAULT TOLERANCE PROTOCOL BREAKING CHANGE: ADD ROOT-BUILD-HEIGHT TO THE QUORUM CERTIFICATE
+//
+// NOTE: This is not expected to be a consensus-breaking change. Historical syncers will work fine without embedding an "if height == X then do Y" condition.
+//
+// 3 PHASES TO THIS UPGRADE:
+//   1) Backwards compatible feature add
+//   2) Upgrade height which switches to the embedded 'root build height' once Validators all upgraded
+//   3) Cleanup the deprecated code
+
+var PROTOCOL_BREAK_UPGRADE_HEIGHT = uint64(520000)
+
 // BFT is a structure that holds data for a Hotstuff BFT instance
 type BFT struct {
 	*lib.View                            // the current period during which the BFT is occurring (Height/Round/Phase)
@@ -261,6 +272,13 @@ func (b *BFT) StartElectionVotePhase() {
 	}
 	// get locally produced Verifiable delay function
 	b.HighVDF = b.VDFService.Finish()
+	// TODO DEPRECATE (1)
+	var rootBuildHeight uint64
+	if b.Height < PROTOCOL_BREAK_UPGRADE_HEIGHT {
+		rootBuildHeight = b.RCBuildHeight
+	} else {
+		rootBuildHeight = b.RootBuildHeight
+	}
 	// sign and send vote to Proposer
 	b.SendToProposer(&Message{
 		Qc: &QC{ // NOTE: Replicas use the QC to communicate important information so that it's aggregable by the Leader
@@ -270,7 +288,7 @@ func (b *BFT) StartElectionVotePhase() {
 		HighQc:                 b.HighQC,                         // forward highest known 'Lock' for this Height, so the new Proposer may satisfy SAFE-NODE-PREDICATE
 		LastDoubleSignEvidence: b.ByzantineEvidence.DSE.Evidence, // forward any evidence of DoubleSigning
 		Vdf:                    b.HighVDF,                        // forward local VDF to the candidate
-		RcBuildHeight:          b.RCBuildHeight,                  // forward the highQC build height (if applicable)
+		RcBuildHeight:          rootBuildHeight,                  // forward the highQC build height (if applicable)
 	})
 }
 
@@ -296,15 +314,28 @@ func (b *BFT) StartProposePhase() {
 		return
 	}
 	b.HighVDF = highVDF
+	// TODO DEPRECATE (2)
+	var rootBuildHeight uint64
+	if b.Height < PROTOCOL_BREAK_UPGRADE_HEIGHT {
+		rootBuildHeight = b.RCBuildHeight
+	} else {
+		rootBuildHeight = b.RootBuildHeight
+	}
 	// produce new proposal or use highQC as the proposal
 	if b.HighQC == nil {
-		b.RCBuildHeight, b.Block, b.Results, err = b.ProduceProposal(b.ByzantineEvidence, b.HighVDF)
+		rootBuildHeight, b.Block, b.Results, err = b.ProduceProposal(b.ByzantineEvidence, b.HighVDF)
 		if err != nil {
 			b.log.Error(err.Error())
 			return
 		}
 	} else {
 		b.Block, b.Results = b.HighQC.Block, b.HighQC.Results
+	}
+	// TODO DEPRECATE (3)
+	if b.Height < PROTOCOL_BREAK_UPGRADE_HEIGHT {
+		b.RCBuildHeight = rootBuildHeight
+	} else {
+		b.RootBuildHeight = rootBuildHeight
 	}
 	// send PROPOSE message to the replicas
 	b.SendToReplicas(b.ValidatorSet, &Message{
@@ -320,7 +351,7 @@ func (b *BFT) StartProposePhase() {
 		},
 		HighQc:                 b.HighQC,                         // nil or justifies the proposal
 		LastDoubleSignEvidence: b.ByzantineEvidence.DSE.Evidence, // evidence is attached (if any) to validate the Proposal
-		RcBuildHeight:          b.RCBuildHeight,                  // the root chain height when the block was built
+		RcBuildHeight:          rootBuildHeight,                  // the root chain height when the block was built
 	})
 }
 
@@ -353,8 +384,15 @@ func (b *BFT) StartProposeVotePhase() {
 			return
 		}
 	}
+	// TODO DEPRECATE (4)
+	var rootBuildHeight uint64
+	if b.Height < PROTOCOL_BREAK_UPGRADE_HEIGHT {
+		rootBuildHeight = msg.RcBuildHeight
+	} else {
+		rootBuildHeight = msg.Qc.Header.RootBuildHeight
+	}
 	// ensure the build height isn't too old
-	if msg.RcBuildHeight < b.CommitteeData.LastRootHeightUpdated {
+	if rootBuildHeight < b.CommitteeData.LastRootHeightUpdated {
 		b.log.Error(lib.ErrInvalidRCBuildHeight().Error())
 		b.RoundInterrupt()
 		return
@@ -364,7 +402,7 @@ func (b *BFT) StartProposeVotePhase() {
 		DSE: NewDSE(msg.LastDoubleSignEvidence),
 	}
 	// check candidate block against FSM
-	if b.BlockResult, err = b.ValidateProposal(msg.RcBuildHeight, msg.Qc, byzantineEvidence); err != nil {
+	if b.BlockResult, err = b.ValidateProposal(rootBuildHeight, msg.Qc, byzantineEvidence); err != nil {
 		b.log.Error(err.Error())
 		b.RoundInterrupt()
 		return
@@ -406,6 +444,13 @@ func (b *BFT) StartPrecommitPhase() {
 		b.RoundInterrupt()
 		return
 	}
+	// TODO DEPRECATE (5)
+	var rootBuildHeight uint64
+	if b.Height < PROTOCOL_BREAK_UPGRADE_HEIGHT {
+		rootBuildHeight = b.RCBuildHeight
+	} else {
+		rootBuildHeight = b.RootBuildHeight
+	}
 	// send PRECOMMIT msg to Replicas
 	b.SendToReplicas(b.ValidatorSet, &Message{
 		Header: b.Copy(),
@@ -416,7 +461,7 @@ func (b *BFT) StartPrecommitPhase() {
 			ProposerKey: b.ProposerKey,
 			Signature:   as,
 		},
-		RcBuildHeight: b.RCBuildHeight,
+		RcBuildHeight: rootBuildHeight,
 	})
 }
 
@@ -440,7 +485,12 @@ func (b *BFT) StartPrecommitVotePhase() {
 	}
 	// `lock` on the proposal (only by satisfying the SAFE-NODE-PREDICATE or COMMIT can this node unlock)
 	b.HighQC = msg.Qc
-	b.RCBuildHeight = msg.RcBuildHeight
+	// TODO DEPRECATE (6)
+	if b.Height < PROTOCOL_BREAK_UPGRADE_HEIGHT {
+		b.RCBuildHeight = msg.RcBuildHeight
+	} else {
+		b.RootBuildHeight = msg.Header.RootBuildHeight
+	}
 	b.HighQC.Block = b.Block
 	b.HighQC.Results = b.Results
 	b.log.Infof("🔒 Locked on proposal %s", lib.BytesToTruncatedString(b.HighQC.BlockHash))
@@ -674,6 +724,7 @@ func (b *BFT) NewHeight(keepLocks ...bool) {
 		b.PartialQCs = make(PartialQCs)
 		b.HighQC = nil
 		b.RCBuildHeight = 0
+		b.RootBuildHeight = 0
 	}
 }
 

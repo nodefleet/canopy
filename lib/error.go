@@ -235,9 +235,9 @@ const (
 
 	CodeValidatorIsADelegate ErrorCode = 66
 
-	CodeInvalidChainId ErrorCode = 68
-	CodeWrongNetworkID ErrorCode = 69
-
+	CodeInvalidChainId           ErrorCode = 68
+	CodeWrongNetworkID           ErrorCode = 69
+	CodeRootBuildHeight          ErrorCode = 70
 	CodeRootHeight               ErrorCode = 71
 	CodeInvalidQCCommitteeHeight ErrorCode = 72
 
@@ -463,7 +463,11 @@ func ErrNewHeight() ErrorI {
 }
 
 func ErrWrongRootHeight() ErrorI {
-	return NewError(CodeRootHeight, ConsensusModule, "wrong root height")
+	return NewError(CodeRootBuildHeight, ConsensusModule, "wrong root height")
+}
+
+func ErrWrongRootBuildHeight() ErrorI {
+	return NewError(CodeRootHeight, ConsensusModule, "wrong root build height")
 }
 
 func ErrInvalidQCCommitteeHeight() ErrorI {

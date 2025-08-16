@@ -132,6 +132,12 @@ func (b *BFT) CheckProposerMessage(x *Message, p *validateMessageParams) (isPart
 		if !bytes.Equal(x.Qc.ResultsHash, p.resultsHash) {
 			return false, lib.ErrMismatchResultsHash()
 		}
+		// check RC build height
+		if x.Qc.Header.Phase > Precommit {
+			if x.Qc.Header.RootBuildHeight != p.view.RootBuildHeight {
+				return false, lib.ErrWrongRootBuildHeight()
+			}
+		}
 	}
 	return
 }
@@ -172,6 +178,12 @@ func (b *BFT) CheckReplicaMessage(x *Message, params *validateMessageParams) lib
 		} else {
 			if !bytes.Equal(x.Qc.BlockHash, params.blockHash) {
 				return lib.ErrMismatchConsBlockHash()
+			}
+		}
+		// check RC build height
+		if x.Qc.Header.Phase >= PrecommitVote {
+			if x.Qc.Header.RootBuildHeight != params.view.RootBuildHeight {
+				return lib.ErrWrongRootBuildHeight()
 			}
 		}
 		if !bytes.Equal(x.Qc.ResultsHash, params.resultsHash) {

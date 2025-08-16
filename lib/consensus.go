@@ -445,12 +445,13 @@ func (x *View) Check(view *View, enforceHeights bool) ErrorI {
 func (x *View) Copy() *View {
 	// clone the view
 	return &View{
-		Height:     x.Height,
-		Round:      x.Round,
-		Phase:      x.Phase,
-		RootHeight: x.RootHeight,
-		NetworkId:  x.NetworkId,
-		ChainId:    x.ChainId,
+		NetworkId:       x.NetworkId,
+		ChainId:         x.ChainId,
+		Height:          x.Height,
+		RootHeight:      x.RootHeight,
+		Round:           x.Round,
+		Phase:           x.Phase,
+		RootBuildHeight: x.RootBuildHeight,
 	}
 }
 
@@ -489,6 +490,11 @@ func (x *View) Equals(v *View) bool {
 	}
 	// if the phases are not equal
 	if x.Phase != v.Phase {
+		// exit with 'unequal'
+		return false
+	}
+	// if the root build heights are not equal
+	if x.RootBuildHeight != v.RootBuildHeight {
 		// exit with 'unequal'
 		return false
 	}
@@ -553,23 +559,25 @@ func (x *View) ToString() string {
 
 // jsonView represents the json.Marshaller and json.Unmarshaler implementation of View
 type jsonView struct {
-	Height     uint64 `json:"height"`
-	RootHeight uint64 `json:"committeeHeight"`
-	Round      uint64 `json:"round"`
-	Phase      string `json:"phase"` // string version of phase
-	NetworkID  uint64 `json:"networkID"`
-	ChainId    uint64 `json:"chainId"`
+	Height          uint64 `json:"height"`
+	RootHeight      uint64 `json:"committeeHeight"`
+	RootBuildHeight uint64 `json:"rootBuildHeight"`
+	Round           uint64 `json:"round"`
+	Phase           string `json:"phase"` // string version of phase
+	NetworkID       uint64 `json:"networkID"`
+	ChainId         uint64 `json:"chainId"`
 }
 
 // MarshalJSON() implements the json.Marshaller interface
 func (x View) MarshalJSON() ([]byte, error) {
 	return json.Marshal(jsonView{
-		Height:     x.Height,
-		RootHeight: x.RootHeight,
-		Round:      x.Round,
-		Phase:      Phase_name[int32(x.Phase)],
-		NetworkID:  x.NetworkId,
-		ChainId:    x.ChainId,
+		Height:          x.Height,
+		RootHeight:      x.RootHeight,
+		RootBuildHeight: x.RootBuildHeight,
+		Round:           x.Round,
+		Phase:           Phase_name[int32(x.Phase)],
+		NetworkID:       x.NetworkId,
+		ChainId:         x.ChainId,
 	})
 }
 
@@ -584,12 +592,13 @@ func (x *View) UnmarshalJSON(jsonBytes []byte) (err error) {
 	}
 	// populate the underlying object with the json object
 	*x = View{
-		NetworkId:  j.NetworkID,
-		ChainId:    j.ChainId,
-		Height:     j.Height,
-		RootHeight: j.RootHeight,
-		Round:      j.Round,
-		Phase:      Phase(Phase_value[j.Phase]),
+		NetworkId:       j.NetworkID,
+		ChainId:         j.ChainId,
+		Height:          j.Height,
+		RootHeight:      j.RootHeight,
+		RootBuildHeight: j.RootBuildHeight,
+		Round:           j.Round,
+		Phase:           Phase(Phase_value[j.Phase]),
 	}
 	// exit
 	return

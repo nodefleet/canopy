@@ -105,6 +105,8 @@ message View {
   // executed sequentially to achieve consensus on the next block.
   // ELECTION->ELECTION-VOTE->PROPOSE->PROPOSE-VOTE->PRECOMMIT->PRECOMMIT-VOTE->COMMIT->COMMIT-PROCESS
   Phase phase = 6;
+  // the root height the block was built on
+  uint64 root_build_height = 7; // @gotags: json:"rootBuildHeight"
 }
 
 // An Aggregate Signature is a single, compact signature created by combining multiple individual signatures from

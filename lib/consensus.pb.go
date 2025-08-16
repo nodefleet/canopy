@@ -178,13 +178,15 @@ type View struct {
 	// each height consists of one or more `rounds` which is a step within the consensus protocol where
 	// a new Proposer is selected to lead the validators to agree on the next block if they fail, the
 	// round is incremented, more time is granted for consensus timeouts, and the cycle starts over
-	Round uint64 `protobuf:"varint,5,opt,name=round,proto3" json:"round,omitempty"`
+	Round uint64 `protobuf:"varint,5,opt,name=round,proto3" json:"round"` // @gotags: json:"round"
 	// represents the smallest unit in the consensus process. Each round consists of multiple phases, and these phases are
 	// executed sequentially to achieve consensus on the next block.
 	// ELECTION->ELECTION-VOTE->PROPOSE->PROPOSE-VOTE->PRECOMMIT->PRECOMMIT-VOTE->COMMIT->COMMIT-PROCESS
-	Phase         Phase `protobuf:"varint,6,opt,name=phase,proto3,enum=types.Phase" json:"phase,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Phase Phase `protobuf:"varint,6,opt,name=phase,proto3,enum=types.Phase" json:"phase"` // @gotags: json:"phase"
+	// the root height the block was built on
+	RootBuildHeight uint64 `protobuf:"varint,7,opt,name=root_build_height,json=rootBuildHeight,proto3" json:"rootBuildHeight"` // @gotags: json:"rootBuildHeight"
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *View) Reset() {
@@ -257,6 +259,13 @@ func (x *View) GetPhase() Phase {
 		return x.Phase
 	}
 	return Phase_UNKNOWN
+}
+
+func (x *View) GetRootBuildHeight() uint64 {
+	if x != nil {
+		return x.RootBuildHeight
+	}
+	return 0
 }
 
 // An Aggregate Signature is a single, compact signature created by combining multiple individual signatures from
@@ -637,7 +646,7 @@ var File_consensus_proto protoreflect.FileDescriptor
 const file_consensus_proto_rawDesc = "" +
 	"\n" +
 	"\x0fconsensus.proto\x12\x05types\x1a\n" +
-	"swap.proto\"\xb3\x01\n" +
+	"swap.proto\"\xdf\x01\n" +
 	"\x04View\x12\x1d\n" +
 	"\n" +
 	"network_id\x18\x01 \x01(\x04R\tnetworkId\x12\x19\n" +
@@ -646,7 +655,8 @@ const file_consensus_proto_rawDesc = "" +
 	"\vroot_height\x18\x04 \x01(\x04R\n" +
 	"rootHeight\x12\x14\n" +
 	"\x05round\x18\x05 \x01(\x04R\x05round\x12\"\n" +
-	"\x05phase\x18\x06 \x01(\x0e2\f.types.PhaseR\x05phase\"J\n" +
+	"\x05phase\x18\x06 \x01(\x0e2\f.types.PhaseR\x05phase\x12*\n" +
+	"\x11root_build_height\x18\a \x01(\x04R\x0frootBuildHeight\"J\n" +
 	"\x12AggregateSignature\x12\x1c\n" +
 	"\tsignature\x18\x01 \x01(\fR\tsignature\x12\x16\n" +
 	"\x06bitmap\x18\x02 \x01(\fR\x06bitmap\")\n" +
