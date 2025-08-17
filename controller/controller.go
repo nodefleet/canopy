@@ -160,19 +160,17 @@ func (c *Controller) UpdateRootChainInfo(info *lib.RootChainInfo) {
 		c.log.Debugf("Detected inactive root-chain update at rootChainId=%d", info.RootChainId)
 		return
 	}
-	// set timestamp if included
-	var timestamp time.Time
-	// if timestamp is not 0
-	if info.Timestamp != 0 {
-		timestamp = time.UnixMicro(int64(info.Timestamp))
-	}
 	// if the last validator set is empty
 	if info.LastValidatorSet == nil || len(info.LastValidatorSet.ValidatorSet) == 0 {
 		// signal to reset consensus and start a new height
-		c.Consensus.ResetBFT <- bft.ResetBFT{IsRootChainUpdate: false, StartTime: timestamp}
+		c.Consensus.ResetBFT <- bft.ResetBFT{IsRootChainUpdate: false, RootHeight: info.Height, BFTMeta: &lib.BFTCoordinationMeta{
+			LastCommitTime: info.BlockTimeInfo.GetEstCommitTime(),
+		}}
 	} else {
 		// signal to reset consensus
-		c.Consensus.ResetBFT <- bft.ResetBFT{IsRootChainUpdate: true, StartTime: timestamp}
+		c.Consensus.ResetBFT <- bft.ResetBFT{IsRootChainUpdate: true, RootHeight: info.Height, BFTMeta: &lib.BFTCoordinationMeta{
+			LastCommitTime: info.BlockTimeInfo.GetEstCommitTime(),
+		}}
 	}
 	// update the peer 'must connect'
 	c.UpdateP2PMustConnect(info.ValidatorSet)
@@ -186,6 +184,12 @@ func (c *Controller) LoadCommittee(rootChainId, rootHeight uint64) (lib.Validato
 // LoadRootChainOrderBook() gets the order book from the root-chain
 func (c *Controller) LoadRootChainOrderBook(rootChainId, rootHeight uint64) (*lib.OrderBook, lib.ErrorI) {
 	return c.RCManager.GetOrders(rootChainId, rootHeight, c.Config.ChainId)
+}
+
+// LoadRootBlockTime() gets the root chain block timing information
+func (c *Controller) LoadRootBlockTime() (*lib.BlockTimeInfo, lib.ErrorI) {
+	activeRootChainId, _ := c.FSM.GetRootChainId()
+	return c.RCManager.BlockTime(activeRootChainId, 0)
 }
 
 // GetRootChainLotteryWinner() gets the pseudorandomly selected delegate to reward and their cut
@@ -267,34 +271,6 @@ func (c *Controller) LoadMaxBlockSize() int {
 	return int(params.BlockSize)
 }
 
-// LoadLastCommitTime() gets a timestamp from the most recent Quorum Block
-func (c *Controller) LoadLastCommitTime(height uint64) time.Time {
-	// load the certificate (and block) from the indexer
-	cert, err := c.FSM.LoadCertificate(height)
-	if err != nil {
-		c.log.Error(err.Error())
-		return time.Time{}
-	}
-	// create a new object reference (to ensure a non-nil result)
-	block := new(lib.Block)
-	// populate the object reference with bytes
-	if err = lib.Unmarshal(cert.Block, block); err != nil {
-		// log the error
-		c.log.Error(err.Error())
-		// exit with empty time
-		return time.Time{}
-	}
-	// ensure the block isn't nil
-	if block.BlockHeader == nil {
-		// log the error
-		c.log.Error("Last block synced is nil")
-		// exit with empty time
-		return time.Time{}
-	}
-	// return the last block time
-	return time.UnixMicro(int64(block.BlockHeader.Time))
-}
-
 // LoadProposerKeys() gets the last root-chainId proposer keys
 func (c *Controller) LoadLastProposers(height uint64) (*lib.Proposers, lib.ErrorI) {
 	// load the last proposers as determined by the last 5 quorum certificates
@@ -321,6 +297,13 @@ func (c *Controller) RootChainHeight() uint64 {
 
 // ChainHeight() returns the height of this target chain
 func (c *Controller) ChainHeight() uint64 { return c.FSM.Height() }
+
+// BlockTime() returns block time information about this chain
+func (c *Controller) BlockTime(height uint64) (time *lib.BlockTimeInfo, err lib.ErrorI) {
+	c.Lock()
+	defer c.Unlock()
+	return c.FSM.LoadBlockTime(height)
+}
 
 // emptyInbox() discards all unread messages for a specific topic
 func (c *Controller) emptyInbox(topic lib.Topic) {

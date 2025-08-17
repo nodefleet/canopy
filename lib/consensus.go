@@ -112,6 +112,7 @@ type RCManagerI interface {
 	GetMinimumEvidenceHeight(rootChainId, rootHeight uint64) (*uint64, ErrorI)                // load the minimum height that evidence is valid
 	GetCheckpoint(rootChainId, height, id uint64) (blockHash HexBytes, i ErrorI)              // get a checkpoint at a height and chain id combination
 	Transaction(rootChainId uint64, tx TransactionI) (hash *string, err ErrorI)               // submit a transaction to the 'root chain'
+	BlockTime(rootChainId, height uint64) (blockTime *BlockTimeInfo, err ErrorI)              // get the block timing information from the root chain
 }
 
 // CheckBasic() validates the basic structure and length of the AggregateSignature

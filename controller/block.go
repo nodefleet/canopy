@@ -77,9 +77,9 @@ func (c *Controller) ListenForBlock() {
 			// if not syncing - gossip the block
 			if !c.Syncing().Load() {
 				// gossip the block to our peers
-				c.GossipBlock(qc, sender, blockMessage.Time)
+				c.GossipBlock(qc, sender, blockMessage.Time, blockMessage.BftCoordinationMeta)
 				// signal a reset to the bft module
-				c.Consensus.ResetBFT <- bft.ResetBFT{StartTime: time.UnixMicro(int64(blockMessage.Time))}
+				c.Consensus.ResetBFT <- bft.ResetBFT{BFTMeta: blockMessage.BftCoordinationMeta}
 			}
 			// reset 'syncDetector' because a new block was received properly
 			syncDetector.Reset()
@@ -95,7 +95,7 @@ func (c *Controller) ListenForBlock() {
 // PUBLISHERS BELOW
 
 // GossipBlockMsg() gossips a certificate (with block) through the P2P network for a specific chainId
-func (c *Controller) GossipBlock(certificate *lib.QuorumCertificate, senderPubToExclude []byte, timestamp uint64) {
+func (c *Controller) GossipBlock(certificate *lib.QuorumCertificate, senderPubToExclude []byte, timestamp uint64, bftMeta *lib.BFTCoordinationMeta) {
 	// log the start of the gossip block function
 	c.log.Debugf("Gossiping certificate: %s", lib.BytesToString(certificate.ResultsHash))
 	// create the block message to gossip
@@ -103,6 +103,7 @@ func (c *Controller) GossipBlock(certificate *lib.QuorumCertificate, senderPubTo
 		ChainId:             c.Config.ChainId,
 		BlockAndCertificate: certificate,
 		Time:                timestamp,
+		BftCoordinationMeta: bftMeta,
 	}
 	// send the block message to all peers excluding the sender (gossip)
 	if err := c.P2P.SendToPeers(Block, blockMessage, lib.BytesToString(senderPubToExclude)); err != nil {
@@ -111,12 +112,13 @@ func (c *Controller) GossipBlock(certificate *lib.QuorumCertificate, senderPubTo
 }
 
 // SelfSendBlock() gossips a QuorumCertificate (with block) through the P2P network for handling
-func (c *Controller) SelfSendBlock(qc *lib.QuorumCertificate, timestamp uint64) {
+func (c *Controller) SelfSendBlock(qc *lib.QuorumCertificate, timestamp uint64, bftMeta *lib.BFTCoordinationMeta) {
 	// create the block message
 	blockMessage := &lib.BlockMessage{
 		ChainId:             c.Config.ChainId,
 		BlockAndCertificate: qc,
 		Time:                timestamp,
+		BftCoordinationMeta: bftMeta,
 	}
 	// internally route the block to the 'block inbox'
 	if err := c.P2P.SelfSend(c.PublicKey, Block, blockMessage); err != nil {
@@ -311,8 +313,6 @@ func (c *Controller) CommitCertificate(qc *lib.QuorumCertificate, block *lib.Blo
 			}
 			continue
 		}
-		// set the timestamp
-		info.Timestamp = ts
 		// publish root chain information
 		go c.RCManager.Publish(id, info)
 	}
