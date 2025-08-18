@@ -707,6 +707,8 @@ func (b *BFT) GetBFTCoordinationMeta() (meta *lib.BFTCoordinationMeta) {
 	if lastRCBlkTime, _ := b.Controller.LoadRootBlockTime(); lastRCBlkTime != nil {
 		// calculate if the timestamps are within 2 seconds of each other
 		estNextRCBlkTime := time.UnixMicro(int64(lastRCBlkTime.EstNextBlockTime))
+		b.log.Infof("Next RootBlock expected: %s NextCommitTime: %s",
+			estNextRCBlkTime.Format("15:04:05"), nextCommitTime.Format("15:04:05"))
 		// if within 2 seconds
 		if estNextRCBlkTime.Sub(nextCommitTime).Abs() <= time.Second*2 {
 			// calculate the RC height after 'next commit'

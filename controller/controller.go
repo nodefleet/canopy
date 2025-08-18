@@ -258,11 +258,12 @@ func (c *Controller) LoadMinimumEvidenceHeight(rootChainId, rootHeight uint64) (
 	return c.RCManager.GetMinimumEvidenceHeight(rootChainId, rootHeight)
 }
 
-// NextBFTStartTime() returns the estimated next CommitTime()
-func (c *Controller) NextBFTStartTime() uint64 {
+// NextBFTCommitTime() returns the estimated next CommitTime()
+func (c *Controller) NextBFTCommitTime() uint64 {
 	blockTime := time.Duration(c.Config.BlockTimeMS()) * time.Millisecond
-	nextBFTStartTime := c.Consensus.LastCommitTime.Add(blockTime).Add(c.Consensus.NewHeightWaitTime())
-	if nextBFTStartTime.Before(time.Now()) || time.Until(nextBFTStartTime) > blockTime {
+	nextBFTStartTime := c.Consensus.LastCommitTime.Add(blockTime)
+	c.log.Warnf("Next BFT commit time: %s", nextBFTStartTime.Format("15:04:05"))
+	if nextBFTStartTime.Add(-1*blockTime).Before(time.Now()) || time.Until(nextBFTStartTime) > blockTime {
 		return uint64(time.Now().UnixMicro())
 	}
 	return uint64(nextBFTStartTime.UnixMicro())
