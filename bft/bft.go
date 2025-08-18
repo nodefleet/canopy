@@ -140,7 +140,7 @@ func (b *BFT) Start() {
 				b.Controller.Lock()
 				defer b.Controller.Unlock()
 				// get the last commit time from the meta
-				lastCommitTime := time.UnixMicro(int64(resetBFT.BFTMeta.LastCommitTime))
+				lastCommitTime := time.UnixMicro(int64(resetBFT.BFTMeta.GetLastCommitTime()))
 				// calculate time since
 				since := time.Since(lastCommitTime)
 				// allow if 'since' is less than 1 block old
