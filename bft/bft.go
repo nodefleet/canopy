@@ -154,7 +154,7 @@ func (b *BFT) Start() {
 					b.log.Info("RESET BFT (NEW_HEIGHT)")
 					b.NewHeight(false)
 					b.SetWaitTimers(b.NewHeightWaitTime(), processTime)
-					b.LastCommitTime = time.UnixMicro(int64(resetBFT.BFTMeta.LastCommitTime))
+					b.LastCommitTime = time.UnixMicro(int64(resetBFT.BFTMeta.GetLastCommitTime()))
 					resetOnRootHeight = resetBFT.BFTMeta.GetResetOnRootHeight()
 				} else {
 					if b.LoadIsOwnRoot() || resetOnRootHeight != 0 && b.Round == 0 && resetOnRootHeight == resetBFT.RootHeight {
