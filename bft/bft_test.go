@@ -693,7 +693,7 @@ func TestRoundInterrupt(t *testing.T) {
 			NetworkId:  lib.CanopyMainnetNetworkId,
 			Height:     1,
 			Round:      1,
-			RootHeight: 1,
+			RootHeight: 0,
 			ChainId:    lib.CanopyChainId,
 			Phase:      RoundInterrupt,
 		})
