@@ -157,12 +157,17 @@ func (b *BFT) Start() {
 					b.LastCommitTime = time.UnixMicro(int64(resetBFT.BFTMeta.GetLastCommitTime()))
 					resetOnRootHeight = resetBFT.BFTMeta.GetResetOnRootHeight()
 				} else {
-					if b.LoadIsOwnRoot() || resetOnRootHeight != 0 && b.Round == 0 && resetOnRootHeight == resetBFT.RootHeight {
-						b.log.Infof("RESET BFT (ROOT_HEIGHT: %d)", resetBFT.RootHeight)
+					if b.Height < PROTOCOL_BREAK_UPGRADE_HEIGHT { // TODO DEPRECATE (11)
 						b.NewHeight(true)
-						b.SetWaitTimers(b.NewHeightWaitTime(), processTime)
+						b.SetWaitTimers(time.Duration(b.Config.NewHeightTimeoutMs)*time.Millisecond, processTime)
 					} else {
-						b.log.Infof("NOTIFICATION (NEW_ROOT_HEIGHT: %d)", resetBFT.RootHeight)
+						if b.LoadIsOwnRoot() || resetOnRootHeight != 0 && b.Round == 0 && resetOnRootHeight == resetBFT.RootHeight {
+							b.log.Infof("RESET BFT (ROOT_HEIGHT: %d)", resetBFT.RootHeight)
+							b.NewHeight(true)
+							b.SetWaitTimers(b.NewHeightWaitTime(), processTime)
+						} else {
+							b.log.Infof("NOTIFICATION (NEW_ROOT_HEIGHT: %d)", resetBFT.RootHeight)
+						}
 					}
 				}
 			}()
