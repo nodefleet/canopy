@@ -434,9 +434,9 @@ func (s *StateMachine) LoadBlockTime(height uint64) (time *lib.BlockTimeInfo, e 
 	// get the block frequency in ms
 	time.BlockFrequencyMs = uint64(s.Config.BlockTimeMS())
 	// calculate the estimated commit time
-	time.EstCommitTime = time.BuildTime + time.BlockFrequencyMs
+	time.EstCommitTime = time.BuildTime + time.BlockFrequencyMs*1000
 	// calculate the estimated next block time
-	time.EstNextBlockTime = time.EstCommitTime + time.BlockFrequencyMs
+	time.EstNextBlockTime = time.EstCommitTime + time.BlockFrequencyMs*1000
 	// exit
 	return
 }

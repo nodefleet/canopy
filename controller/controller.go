@@ -258,6 +258,16 @@ func (c *Controller) LoadMinimumEvidenceHeight(rootChainId, rootHeight uint64) (
 	return c.RCManager.GetMinimumEvidenceHeight(rootChainId, rootHeight)
 }
 
+// NextBFTStartTime() returns the estimated next CommitTime()
+func (c *Controller) NextBFTStartTime() uint64 {
+	blockTime := time.Duration(c.Config.BlockTimeMS()) * time.Millisecond
+	nextBFTStartTime := c.Consensus.LastCommitTime.Add(blockTime).Add(c.Consensus.NewHeightWaitTime())
+	if nextBFTStartTime.Before(time.Now()) || time.Until(nextBFTStartTime) > blockTime {
+		return uint64(time.Now().UnixMicro())
+	}
+	return uint64(nextBFTStartTime.UnixMicro())
+}
+
 // LoadMaxBlockSize() gets the max block size from the state
 func (c *Controller) LoadMaxBlockSize() int {
 	// load the maximum block size from the nested chain FSM
@@ -300,8 +310,6 @@ func (c *Controller) ChainHeight() uint64 { return c.FSM.Height() }
 
 // BlockTime() returns block time information about this chain
 func (c *Controller) BlockTime(height uint64) (time *lib.BlockTimeInfo, err lib.ErrorI) {
-	c.Lock()
-	defer c.Unlock()
 	return c.FSM.LoadBlockTime(height)
 }
 

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
-	"math"
 	"slices"
 	"sort"
 	"sync/atomic"
@@ -52,7 +51,8 @@ type BFT struct {
 	ResetBFT   chan ResetBFT // trigger that resets the BFT due to a new Target block or a new Canopy block
 	syncing    *atomic.Bool  // if chain for this committee is currently catching up to latest height
 
-	PhaseTimer *time.Timer // ensures the node waits for a configured duration (Round x phaseTimeout) to allow for full voter participation
+	PhaseTimer     *time.Timer // ensures the node waits for a configured duration (Round x phaseTimeout) to allow for full voter participation
+	LastCommitTime time.Time   // the last time a block was committed
 
 	PublicKey  []byte             // self consensus public key
 	PrivateKey crypto.PrivateKeyI // self consensus private key
@@ -140,7 +140,7 @@ func (b *BFT) Start() {
 				b.Controller.Lock()
 				defer b.Controller.Unlock()
 				// get the last commit time from the meta
-				lastCommitTime := time.UnixMicro(int64(resetBFT.BFTMeta.GetLastCommitTime()))
+				lastCommitTime := time.UnixMicro(int64(resetBFT.BFTMeta.LastCommitTime))
 				// calculate time since
 				since := time.Since(lastCommitTime)
 				// allow if 'since' is less than 1 block old
@@ -151,17 +151,18 @@ func (b *BFT) Start() {
 				// if is a root-chain update reset back to round 0 but maintain locks to prevent 'fork attacks'
 				// else increment the height and don't maintain locks
 				if !resetBFT.IsRootChainUpdate {
-					b.log.Info("Reset BFT (NEW_HEIGHT)")
+					b.log.Info("RESET BFT (NEW_HEIGHT)")
 					b.NewHeight(false)
-					b.SetWaitTimers(time.Duration(b.Config.NewHeightTimeoutMs)*time.Millisecond, processTime)
+					b.SetWaitTimers(b.NewHeightWaitTime(), processTime)
+					b.LastCommitTime = time.UnixMicro(int64(resetBFT.BFTMeta.LastCommitTime))
 					resetOnRootHeight = resetBFT.BFTMeta.GetResetOnRootHeight()
 				} else {
-					b.log.Info("Reset BFT (NEW_COMMITTEE)")
-					if resetOnRootHeight != 0 && b.Round == 0 && resetOnRootHeight == resetBFT.RootHeight {
-						// reset to 0
+					if b.LoadIsOwnRoot() || resetOnRootHeight != 0 && b.Round == 0 && resetOnRootHeight == resetBFT.RootHeight {
+						b.log.Infof("RESET BFT (ROOT_HEIGHT: %d)", resetBFT.RootHeight)
 						b.NewHeight(true)
-						// set the wait timers to start consensus
-						b.SetWaitTimers(time.Duration(b.Config.NewHeightTimeoutMs)*time.Millisecond, processTime)
+						b.SetWaitTimers(b.NewHeightWaitTime(), processTime)
+					} else {
+						b.log.Infof("NOTIFICATION (NEW_ROOT_HEIGHT: %d)", resetBFT.RootHeight)
 					}
 				}
 			}()
@@ -537,7 +538,7 @@ func (b *BFT) StartCommitPhase() {
 			ProposerKey: b.ProposerKey,
 			Signature:   as,
 		},
-		BftCoordinationMeta: b.GetBFTCoordinationMeta(),
+		BftCoordinationMeta: b.GetBFTCoordinationMeta(),                                      // provide the next replicas BFT coordination information to help prevent partitions
 		Timestamp:           uint64(time.Now().Add(b.WaitTime(Commit, b.Round)).UnixMicro()), // TODO deprecate (9)
 	})
 }
@@ -656,7 +657,7 @@ func (b *BFT) DetermineNextRootHeightAndRound(round uint64) (totalVP, rootHeight
 	// but omit self during the PacemakerPhase() in order to determine if a +2/3 majority may be reached if self joins the best faction
 	isPrePacemakerPhase := round == b.Round+1
 	if isPrePacemakerPhase {
-		addVote(b.PublicKey, round, b.RootHeight, true)
+		addVote(b.PublicKey, round, b.Controller.RootChainHeight(), true)
 	}
 	// convert map to slice and sort
 	pacemakerVotes := make([]*Message, 0, len(b.PacemakerMessages))
@@ -705,23 +706,23 @@ func (b *BFT) AddPacemakerMessage(msg *Message) (err lib.ErrorI) {
 	return
 }
 
-// DetermineResetOnRoot() lets the previous leader decide whether to issue a "reset on Round 0 for rHeight X" command
+// DetermineResetOnRoot() provide coordination information to help prevent network partitions especially for nested chains
 func (b *BFT) GetBFTCoordinationMeta() (meta *lib.BFTCoordinationMeta) {
 	// next commit time
 	nextCommitTime := time.Now().Add(b.WaitTime(Commit, b.Round))
-	// determine if should reset on root height
-	estNextBlockTime := uint64(nextCommitTime.Add(time.Duration(b.Config.NewHeightTimeoutMs) * time.Millisecond).UnixMicro())
 	// initialize the meta
 	meta = &lib.BFTCoordinationMeta{LastCommitTime: uint64(nextCommitTime.UnixMicro())}
 	// get the root chain block timing
-	rootChainBlockTime, _ := b.Controller.LoadRootBlockTime()
-	if rootChainBlockTime != nil {
+	if lastRCBlkTime, _ := b.Controller.LoadRootBlockTime(); lastRCBlkTime != nil {
 		// calculate if the timestamps are within 2 seconds of each other
-		within2Sec := math.Abs(float64(rootChainBlockTime.EstNextBlockTime-estNextBlockTime)) <= 2_000_000
+		estNextRCBlkTime := time.UnixMicro(int64(lastRCBlkTime.EstNextBlockTime))
 		// if within 2 seconds
-		if within2Sec {
+		if estNextRCBlkTime.Sub(nextCommitTime).Abs() <= time.Second*2 {
+			// calculate the RC height after 'next commit'
+			rcHeightAfterNextCommit := lastRCBlkTime.Height + 2
+			b.log.Infof("ResetOnRootHeight set to %d", rcHeightAfterNextCommit)
 			// set the reset root on height to the next root block
-			meta.ResetOnRootHeight = rootChainBlockTime.Height + 1
+			meta.ResetOnRootHeight = rcHeightAfterNextCommit
 		}
 	}
 	return
@@ -893,6 +894,11 @@ func (b *BFT) WaitTime(phase Phase, round uint64) (waitTime time.Duration) {
 // waitTime() calculates the waiting time for a specific sleepTime configuration and Round number (helper)
 func (b *BFT) waitTime(sleepTimeMS int, round uint64) time.Duration {
 	return time.Duration(uint64(sleepTimeMS)*(2*round+1)) * time.Millisecond
+}
+
+// NewHeightWaitTime() calculates the waiting time between last commit and election
+func (b *BFT) NewHeightWaitTime() (waitTime time.Duration) {
+	return time.Duration(b.Config.NewHeightTimeoutMs) * time.Millisecond
 }
 
 // msLeftInRound() calculates the milliseconds left in the round
