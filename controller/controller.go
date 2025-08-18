@@ -309,8 +309,8 @@ func (c *Controller) RootChainHeight() uint64 {
 func (c *Controller) ChainHeight() uint64 { return c.FSM.Height() }
 
 // BlockTime() returns block time information about this chain
-func (c *Controller) BlockTime(height uint64) (time *lib.BlockTimeInfo, err lib.ErrorI) {
-	return c.FSM.LoadBlockTime(height)
+func (c *Controller) BlockTime(h uint64) (*lib.BlockTimeInfo, lib.ErrorI) {
+	return c.FSM.LoadBlockTime(h)
 }
 
 // emptyInbox() discards all unread messages for a specific topic

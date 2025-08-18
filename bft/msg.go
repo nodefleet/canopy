@@ -161,8 +161,8 @@ func (b *BFT) CheckReplicaMessage(x *Message, params *validateMessageParams) lib
 		if err := x.Qc.Header.Check(params.view, false); err != nil {
 			return err
 		}
+		// check for wrong height error
 		if x.Qc.Header.Height != params.view.Height {
-			// exit with wrong height error
 			return lib.ErrWrongViewHeight(x.Qc.Header.Height, params.view.Height)
 		}
 		return nil

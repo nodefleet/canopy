@@ -101,7 +101,7 @@ This cross-chain communication allows for secure token exchanges without requiri
 ## Security & Integrity Mechansisms
 
 - **Escrow**: Seller tokens are held in escrow until the swap is completed
-- **Deadlines**: LastCommitTime-limited transactions prevent indefinite locks on orders
+- **Deadlines**: Time-limited transactions prevent indefinite locks on orders
 - **Verification**: Multiple validators verify payment transactions
 - **Deterministic Parsing**: Transaction parsing follows strict rules to ensure all validators reach the same conclusion
 - **Historical Checking**: The system can check previous blocks to confirm order status

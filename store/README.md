@@ -604,7 +604,7 @@ The Latest State Store maintains the most current version of all state data, usi
 The Historical State Store maintains historical state data in partition-based snapshots, using the prefix `h/{partition_height}/` (e.g., `h/10000/`). It:
 
 1. **Preserves History**: Maintains complete state snapshots at regular intervals
-2. **Enables LastCommitTime Travel**: Allows querying state at any historical block height
+2. **Enables Time Travel**: Allows querying state at any historical block height
 3. **Supports Efficient Queries**: Optimized for historical data retrieval
 4. **Supports Safe Pruning**: Partitioning enables safe deletion of older state data
 

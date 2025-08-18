@@ -590,21 +590,12 @@ func (b *BFT) RoundInterrupt() {
 	b.BlockResult = nil
 	b.VDFCache = []*Message{}
 	b.ResetFSM()
+	view := b.View.Copy()
 	// determine the best faction based on what is currently known
-	_, rootHeight, nextRound := b.DetermineNextRootHeightAndRound(b.Round + 1)
+	_, view.RootHeight, view.Round = b.DetermineNextRootHeightAndRound(b.Round + 1)
 	// send pacemaker message
 	b.SendToReplicas(b.ValidatorSet, &Message{
-		Qc: &lib.QuorumCertificate{
-			Header: &lib.View{
-				NetworkId:       b.NetworkId,
-				ChainId:         b.ChainId,
-				Height:          b.Height,
-				RootHeight:      rootHeight,
-				Round:           nextRound,
-				Phase:           b.Phase,
-				RootBuildHeight: b.RootBuildHeight,
-			},
-		},
+		Qc: &lib.QuorumCertificate{Header: view},
 	})
 }
 
@@ -766,7 +757,7 @@ func (b *BFT) NewRound(newHeight bool) {
 		// defensive: clear byzantine evidence
 		b.ByzantineEvidence = &ByzantineEvidence{DSE: DoubleSignEvidences{}}
 	}
-	b.RefreshRootChainInfo(0)
+	b.RefreshRootChainInfo()
 	// reset ProposerKey, Proposal, and Sortition data
 	b.ProposerKey = nil
 	b.Block, b.BlockHash, b.Results = nil, nil, nil
@@ -775,14 +766,14 @@ func (b *BFT) NewRound(newHeight bool) {
 }
 
 // RefreshRootChainInfo() updates the cached root chain info with the latest known
-func (b *BFT) RefreshRootChainInfo(rootHeight uint64) {
+func (b *BFT) RefreshRootChainInfo(rootHeight ...uint64) {
 	var err lib.ErrorI
 	// update heights
 	b.Height = b.Controller.ChainHeight()
-	if rootHeight == 0 {
+	if len(rootHeight) != 1 {
 		b.RootHeight = b.Controller.RootChainHeight()
 	} else {
-		b.RootHeight = rootHeight
+		b.RootHeight = rootHeight[0]
 	}
 	// update the validator set
 	b.ValidatorSet, err = b.Controller.LoadCommittee(b.LoadRootChainId(b.Height), b.RootHeight)
@@ -967,7 +958,7 @@ func (b *BFT) SelfIsValidator() bool {
 		// defensively check to make sure there wasn't a race between
 		// NEW_HEIGHT and NEW_COMMITTEE, worst case is extra consensus
 		// participation
-		b.RefreshRootChainInfo(0)
+		b.RefreshRootChainInfo()
 		// double check
 		selfValidator, _ = b.ValidatorSet.GetValidator(b.PublicKey)
 	}
