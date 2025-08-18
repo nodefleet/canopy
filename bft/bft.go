@@ -612,7 +612,7 @@ func (b *BFT) Pacemaker(waitS int) {
 		// determine largest faction
 		totalVP, rootHeight, nextRound := b.DetermineNextRootHeightAndRound(b.Round)
 		// check exit condition
-		if totalVP >= b.ValidatorSet.MinimumMaj23 || i == waitS {
+		if totalVP >= b.ValidatorSet.MinimumMaj23 && b.ValidatorSet.MinimumMaj23 > 0 || i == waitS {
 			// set round
 			b.Round = nextRound
 			// set root height and refresh root chain info
