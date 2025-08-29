@@ -14,7 +14,7 @@ const socials = [
 
 const Footer = () => {
   return (
-    <footer class="footer-light">
+    <footer className="footer-light">
       <Container>
         {/* Use map to render social icons dynamically */}
         {socials.map((social, index) => (
