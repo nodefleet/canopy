@@ -8,28 +8,29 @@
   NPM_FLAGS = "--legacy-peer-deps"
   VITE_NODE_ENV = "production"
 
-# RPC/Admin proxy routes (same-origin) to avoid browser CORS issues
+# RPC/Admin proxy routes (same-origin) to avoid browser CORS issues.
+# Set RPC_NODE1, ADMIN_NODE1, RPC_NODE2, ADMIN_NODE2 in Netlify dashboard.
 [[redirects]]
   from = "/rpc-node1/*"
-  to = "https://node1.canopy.us.nodefleet.net/rpc/:splat"
+  to = "${RPC_NODE1}/:splat"
   status = 200
   force = true
 
 [[redirects]]
   from = "/admin-node1/*"
-  to = "https://node1.canopy.us.nodefleet.net/admin/:splat"
+  to = "${ADMIN_NODE1}/:splat"
   status = 200
   force = true
 
 [[redirects]]
   from = "/rpc-node2/*"
-  to = "https://node2.canopy.us.nodefleet.net/rpc/:splat"
+  to = "${RPC_NODE2}/:splat"
   status = 200
   force = true
 
 [[redirects]]
   from = "/admin-node2/*"
-  to = "https://node2.canopy.us.nodefleet.net/admin/:splat"
+  to = "${ADMIN_NODE2}/:splat"
   status = 200
   force = true
 
